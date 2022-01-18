@@ -189,9 +189,11 @@ class TextBase(object):
                             break
                         except RuntimeError as err:
                             if (str(err).startswith('Error(s) in loading state_dict for')):
-                                name = str(err).split('"')[1]
-                                print("deleting", name)
-                                del weights[str(err).split('"')[1]]
+                                names = str(err).split(',')
+                                for name in names:
+                                    name = name.split('"')[1]
+                                    print("deleting", name)
+                                    del weights[name]
                 else:
                     model.load_state_dict(
                         {'module.' + k: v for k, v in torch.load(self.resume)['state_dict_G'].items()})
