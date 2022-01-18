@@ -192,7 +192,7 @@ class TextSR(base.TextBase):
             val_batch_size = images_lr.shape[0]
             images_lr = images_lr.to(self.device)
             images_hr = images_hr.to(self.device)
-            images_sr = model(images_lr)
+            images_sr, _ = model(images_lr)
 
             if i == len(val_loader) - 1:
                 index = random.randint(0, images_lr.shape[0]-1)
