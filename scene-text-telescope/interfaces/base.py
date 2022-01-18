@@ -21,6 +21,7 @@ from model import tbsrn, tsrn, edsr, srcnn, srresnet, crnn
 import dataset.dataset as dataset
 from dataset import lmdbDataset, alignCollate_real, ConcatDataset, lmdbDataset_real, alignCollate_syn, lmdbDataset_mix
 from loss import gradient_loss, percptual_loss, text_focus_loss
+from model.qtbsrn import QTBSRN
 from utils import util, ssim_psnr, utils_moran, utils_crnn
 from utils.labelmaps import get_vocabulary, labels2strs
 
@@ -135,11 +136,15 @@ class TextBase(object):
             drop_last=False)
         return test_dataset, test_loader
 
-    def generator_init(self, small=False):
+    def generator_init(self, small=False, quantized=False):
         cfg = self.config.TRAIN
         if self.args.arch == 'tbsrn':
-            model = tbsrn.TBSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
-                              STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u, small=small)
+            if quantized:
+                model = QTBSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
+                                STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u)
+            else:
+                model = tbsrn.TBSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
+                                STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u, small=small)
             image_crit = text_focus_loss.TextFocusLoss(self.args)
         elif self.args.arch == 'tsrn':
             model = tsrn.TSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,

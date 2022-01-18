@@ -4,11 +4,20 @@ import torch.nn.functional as F
 from torch import nn
 import warnings
 import math, copy
+from bitorch.layers import qlinear, qconv
+from bitorch.layers.qconv import QConv2d_NoAct as BinQConv2d_NoAct
+from bitorch.layers.qlinear import QLinear as BinQLinear
+from bitorch.quantizations import WeightDoReFa
+from tbsrn import *
 
 warnings.filterwarnings("ignore")
 
 from .tps_spatial_transformer import TPSSpatialTransformer
 from .stn_head import STNHead
+
+QUANTIZATION = WeightDoReFa(bits=8)
+QConv2d = lambda *x, **kx: BinQConv2d_NoAct(*x, weight_quantization=QUANTIZATION, **kx)
+QLinear = lambda *x, **kx: BinQLinear(*x, weight_quantization=QUANTIZATION, **kx)
 
 def clones(module, N):
     "Produce N identical layers."
@@ -52,21 +61,22 @@ def positionalencoding2d(d_model, height, width):
     pe[1:d_model:2, :, :] = torch.cos(pos_w * div_term).transpose(0, 1).unsqueeze(1).repeat(1, height, 1)
     pe[d_model::2, :, :] = torch.sin(pos_h * div_term).transpose(0, 1).unsqueeze(2).repeat(1, 1, width)
     pe[d_model + 1::2, :, :] = torch.cos(pos_h * div_term).transpose(0, 1).unsqueeze(2).repeat(1, 1, width)
-
     return pe
 
-class FeatureEnhancer(nn.Module):
+class QFeatureEnhancer(nn.Module):
+    def __init__(self, quantize_multihead=True, quantize_pff=True):
+        super(QFeatureEnhancer, self).__init__()
 
-    def __init__(self):
-        super(FeatureEnhancer, self).__init__()
-
-        self.multihead = MultiHeadedAttention(h=4, d_model=128, dropout=0.1)
+        MULTIHEAD = QMultiHeadedAttention if quantize_multihead else MultiHeadedAttention
+        self.multihead = MULTIHEAD(h=4, d_model=128, dropout=0.1)
+        # TODO CHECK LAYERNORM QUANTIZATION
         self.mul_layernorm1 = LayerNorm(features=128)
 
-        self.pff = PositionwiseFeedForward(128, 128)
+        PFF = QPositionwiseFeedForward if quantize_pff else PositionwiseFeedForward
+        self.pff = PFF(128, 128)
         self.mul_layernorm3 = LayerNorm(features=128)
 
-        self.linear = nn.Linear(128,64)
+        self.linear = QLinear(128,64)
 
     def forward(self, conv_feature):
         '''
@@ -87,19 +97,19 @@ class FeatureEnhancer(nn.Module):
         return result.permute(0, 2, 1).contiguous()
 
 
-class MultiHeadedAttention(nn.Module):
+class QMultiHeadedAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1, compress_attention=False):
         "Take in model size and number of heads."
-        super(MultiHeadedAttention, self).__init__()
+        super(QMultiHeadedAttention, self).__init__()
         assert d_model % h == 0
         # We assume d_v always equals d_k
         self.d_k = d_model // h
         self.h = h
-        self.linears = clones(nn.Linear(d_model, d_model), 4)
+        self.linears = clones(QLinear(d_model, d_model), 4)
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
         self.compress_attention = compress_attention
-        self.compress_attention_linear = nn.Linear(h, 1)
+        self.compress_attention_linear = QLinear(h, 1)
 
     def forward(self, query, key, value, mask=None, align=None):
         "Implements Figure 2"
@@ -144,22 +154,35 @@ def attention(query, key, value, mask=None, dropout=None, align=None):
 
     return torch.matmul(p_attn, value), p_attn
 
-
-class PositionwiseFeedForward(nn.Module):
+class QPositionwiseFeedForward(nn.Module):
     "Implements FFN equation."
 
     def __init__(self, d_model, d_ff, dropout=0.1):
-        super(PositionwiseFeedForward, self).__init__()
-        self.w_1 = nn.Linear(d_model, d_ff)
-        self.w_2 = nn.Linear(d_ff, d_model)
+        super(QPositionwiseFeedForward, self).__init__()
+        self.w_1 = QLinear(d_model, d_ff)
+        self.w_2 = QLinear(d_ff, d_model)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
-class TBSRN(nn.Module):
-    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3, small=False):
-        super(TBSRN, self).__init__()
+class QTBSRN(nn.Module):
+    def __init__(
+        self,
+        scale_factor=2,
+        width=128,
+        height=32,
+        STN=True,
+        srb_nums=5,
+        mask=False,
+        hidden_units=32,
+        input_channel=3,
+        small=False,
+        quantize_rrb=True
+    ):
+        super(QTBSRN, self).__init__()
+
+        RRB = QRecurrentResidualBlock if quantize_rrb else RecurrentResidualBlock
 
         self.conv = nn.Conv2d(input_channel, 3,3,1,1)
         self.bn = nn.BatchNorm2d(3)
@@ -178,10 +201,10 @@ class TBSRN(nn.Module):
         self.srb_nums = srb_nums
         if not small:
             for i in range(srb_nums):
-                setattr(self, 'block%d' % (i + 2), RecurrentResidualBlock(2 * hidden_units))
+                setattr(self, 'block%d' % (i + 2), RRB(2 * hidden_units))
         else:
             for i in range(srb_nums):
-                setattr(self, 'block%d' % (i + 2), RecurrentResidualBlockSmall(2 * hidden_units))
+                setattr(self, 'block%d' % (i + 2), RRB(2 * hidden_units))
 
         setattr(self, 'block%d' % (srb_nums + 2),
                 nn.Sequential(
@@ -227,23 +250,22 @@ class TBSRN(nn.Module):
         output = torch.tanh(block[str(self.srb_nums + 3)])
         return output, block
 
-
-class RecurrentResidualBlock(nn.Module):
-    def __init__(self, channels):
-        super(RecurrentResidualBlock, self).__init__()
-        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+class QRecurrentResidualBlock(nn.Module):
+    def __init__(self, channels, quantize_feature_enhancer=True):
+        super(QRecurrentResidualBlock, self).__init__()
+        self.conv1 = QConv2d(channels, channels, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(channels)
         self.gru1 = GruBlock(channels, channels)
         # self.prelu = nn.ReLU()
 
         #------ we could try to remove this
         self.prelu = mish()
-        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.conv2 = QConv2d(channels, channels, kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm2d(channels)
         self.gru2 = GruBlock(channels, channels)
         #------
 
-        self.feature_enhancer = FeatureEnhancer()
+        self.feature_enhancer = QFeatureEnhancer() if quantize_feature_enhancer else FeatureEnhancer()
 
         for p in self.parameters():
             if p.dim() > 1:
@@ -261,42 +283,6 @@ class RecurrentResidualBlock(nn.Module):
         residual = self.feature_enhancer(residual)
         residual = residual.resize(size[0], size[1], size[2], size[3])
         return x + residual
-
-class RecurrentResidualBlockSmall(nn.Module):
-    def __init__(self, channels):
-        super(RecurrentResidualBlockSmall, self).__init__()
-        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(channels)
-        self.gru1 = GruBlock(channels, channels)
-        # self.prelu = nn.ReLU()
-
-        #------ we could try to remove this
-        # self.prelu = mish()
-        # self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        # self.bn2 = nn.BatchNorm2d(channels)
-        # self.gru2 = GruBlock(channels, channels)
-        #------
-
-        self.feature_enhancer = FeatureEnhancer()
-
-        for p in self.parameters():
-            if p.dim() > 1:
-                nn.init.xavier_uniform_(p)
-
-    def forward(self, x):
-        residual = self.conv1(x)
-        residual = self.bn1(residual)
-        # residual = self.prelu(residual)
-        # residual = self.conv2(residual)
-        # residual = self.bn2(residual)
-
-        size = residual.shape
-        residual = residual.view(size[0],size[1],-1)
-        residual = self.feature_enhancer(residual)
-        residual = residual.resize(size[0], size[1], size[2], size[3])
-        return x + residual
-
-
 
 class UpsampleBLock(nn.Module):
     def __init__(self, in_channels, up_scale):
