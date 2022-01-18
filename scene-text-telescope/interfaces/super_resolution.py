@@ -41,7 +41,7 @@ class TextSR(base.TextBase):
         teacher_model_dict = self.generator_init()
         teacher_model, teachere_image_crit = teacher_model_dict['model'], teacher_model_dict['crit']
 
-        student_model_dict = self.generator_init()
+        student_model_dict = self.generator_init(small=True)
         student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
 
         block_loss = torch.nn.MSELoss()
