@@ -164,7 +164,7 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class TBSRN(nn.Module):
-    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3):
+    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3, small=False):
         super(TBSRN, self).__init__()
 
         self.conv = nn.Conv2d(input_channel, 3,3,1,1)
@@ -182,8 +182,12 @@ class TBSRN(nn.Module):
             # nn.ReLU()
         )
         self.srb_nums = srb_nums
-        for i in range(srb_nums):
-            setattr(self, 'block%d' % (i + 2), RecurrentResidualBlock(2 * hidden_units))
+        if not small:
+            for i in range(srb_nums):
+                setattr(self, 'block%d' % (i + 2), RecurrentResidualBlock(2 * hidden_units))
+        else:
+            for i in range(srb_nums):
+                setattr(self, 'block%d' % (i + 2), RecurrentResidualBlockSmall(2 * hidden_units))
 
         setattr(self, 'block%d' % (srb_nums + 2),
                 nn.Sequential(
@@ -216,14 +220,18 @@ class TBSRN(nn.Module):
             # x = F.interpolate(x, self.tps_inputsize, mode='bilinear', align_corners=True)
             _, ctrl_points_x = self.stn_head(x)
             x, _ = self.tps(x, ctrl_points_x)
+
+        #apply first block
         block = {'1': self.block1(x)}
+
+        #apply second to sixth block
         for i in range(self.srb_nums + 1):
             block[str(i + 2)] = getattr(self, 'block%d' % (i + 2))(block[str(i + 1)])
 
-        block[str(self.srb_nums + 3)] = getattr(self, 'block%d' % (self.srb_nums + 3)) \
-            ((block['1'] + block[str(self.srb_nums + 2)]))
+        # apply the upsample blocks to the sum of the first block + output of the MHA blocks
+        block[str(self.srb_nums + 3)] = getattr(self, 'block%d' % (self.srb_nums + 3))((block['1'] + block[str(self.srb_nums + 2)]))
         output = torch.tanh(block[str(self.srb_nums + 3)])
-        return output
+        return output, block
 
 
 class RecurrentResidualBlock(nn.Module):
@@ -233,10 +241,14 @@ class RecurrentResidualBlock(nn.Module):
         self.bn1 = nn.BatchNorm2d(channels)
         self.gru1 = GruBlock(channels, channels)
         # self.prelu = nn.ReLU()
+
+        #------ we could try to remove this
         self.prelu = mish()
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm2d(channels)
         self.gru2 = GruBlock(channels, channels)
+        #------
+
         self.feature_enhancer = FeatureEnhancer()
 
         for p in self.parameters():
@@ -249,6 +261,40 @@ class RecurrentResidualBlock(nn.Module):
         residual = self.prelu(residual)
         residual = self.conv2(residual)
         residual = self.bn2(residual)
+
+        size = residual.shape
+        residual = residual.view(size[0],size[1],-1)
+        residual = self.feature_enhancer(residual)
+        residual = residual.resize(size[0], size[1], size[2], size[3])
+        return x + residual
+
+class RecurrentResidualBlockSmall(nn.Module):
+    def __init__(self, channels):
+        super(RecurrentResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.gru1 = GruBlock(channels, channels)
+        # self.prelu = nn.ReLU()
+
+        #------ we could try to remove this
+        # self.prelu = mish()
+        # self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        # self.bn2 = nn.BatchNorm2d(channels)
+        # self.gru2 = GruBlock(channels, channels)
+        #------
+
+        self.feature_enhancer = FeatureEnhancer()
+
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(self, x):
+        residual = self.conv1(x)
+        residual = self.bn1(residual)
+        # residual = self.prelu(residual)
+        # residual = self.conv2(residual)
+        # residual = self.bn2(residual)
 
         size = residual.shape
         residual = residual.view(size[0],size[1],-1)

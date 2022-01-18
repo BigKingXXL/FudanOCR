@@ -135,11 +135,11 @@ class TextBase(object):
             drop_last=False)
         return test_dataset, test_loader
 
-    def generator_init(self):
+    def generator_init(self, small=False):
         cfg = self.config.TRAIN
         if self.args.arch == 'tbsrn':
             model = tbsrn.TBSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
-                              STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u)
+                              STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u, small=small)
             image_crit = text_focus_loss.TextFocusLoss(self.args)
         elif self.args.arch == 'tsrn':
             model = tsrn.TSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,

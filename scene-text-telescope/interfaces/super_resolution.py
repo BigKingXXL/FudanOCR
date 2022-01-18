@@ -38,11 +38,16 @@ class TextSR(base.TextBase):
         cfg = self.config.TRAIN
         train_dataset, train_loader = self.get_train_data()
         val_dataset_list, val_loader_list = self.get_val_data()
-        model_dict = self.generator_init()
-        model, image_crit = model_dict['model'], model_dict['crit']
+        teacher_model_dict = self.generator_init()
+        teacher_model, teachere_image_crit = teacher_model_dict['model'], teacher_model_dict['crit']
+
+        student_model_dict = self.generator_init()
+        student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
+
+        block_loss = torch.nn.MSELoss()
 
         aster, aster_info = self.CRNN_init()
-        optimizer_G = self.optimizer_init(model)
+        student_optimizer_G = self.optimizer_init(student_model)
 
         # if not os.path.exists(cfg.ckpt_dir):
         #     os.makedirs(cfg.ckpt_dir)
@@ -57,8 +62,9 @@ class TextSR(base.TextBase):
 
         for epoch in range(cfg.epochs):
             for j, data in (enumerate(train_loader)):
-                model.train()
-                for p in model.parameters():
+                teacher_model.eval()
+                student_model.train()
+                for p in student_model.parameters():
                     p.requires_grad = True
                 iters = len(train_loader) * epoch + j
 
@@ -66,9 +72,15 @@ class TextSR(base.TextBase):
                 images_lr = images_lr.to(self.device)
                 images_hr = images_hr.to(self.device)
 
-                sr_img = model(images_lr)
+                teacher_image_prediction, teacher_blocks = teacher_model(images_lr)
+                student_image_prediction, student_blocks = student_model(images_lr)
 
-                loss, mse_loss, attention_loss, recognition_loss = image_crit(sr_img, images_hr, label_strs)
+                loss, mse_loss, attention_loss, recognition_loss = student_image_crit(student_image_prediction, images_hr, label_strs)
+
+                for key in student_blocks.keys():
+                    loss += block_loss(student_blocks[key], teacher_blocks[key])
+
+                loss += block_loss(student_image_prediction, teacher_image_prediction)
 
                 global times
                 self.writer.add_scalar('loss/mse_loss', mse_loss , times)
@@ -78,10 +90,10 @@ class TextSR(base.TextBase):
 
                 loss_im = loss * 100
 
-                optimizer_G.zero_grad()
+                student_optimizer_G.zero_grad()
                 loss_im.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 0.25)
-                optimizer_G.step()
+                torch.nn.utils.clip_grad_norm_(student_model.parameters(), 0.25)
+                student_optimizer_G.step()
 
                 if iters % cfg.displayInterval == 0:
                     logging.info('[{}]\t'
@@ -106,7 +118,7 @@ class TextSR(base.TextBase):
                     for k, val_loader in enumerate(val_loader_list):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
                         logging.info('evaling %s' % data_name)
-                        metrics_dict = self.eval(model, val_loader, image_crit, iters, aster, aster_info, data_name)
+                        metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name)
                         converge_list.append({'iterator': iters,
                                               'acc': metrics_dict['accuracy'],
                                               'psnr': metrics_dict['psnr_avg'],
@@ -131,12 +143,12 @@ class TextSR(base.TextBase):
                         best_model_ssim[data_name] = metrics_dict['ssim_avg']
                         best_model_info = {'accuracy': best_model_acc, 'psnr': best_model_psnr, 'ssim': best_model_ssim}
                         logging.info('saving best model')
-                        self.save_checkpoint(model, epoch, iters, best_history_acc, best_model_info, True,
+                        self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, True,
                                              converge_list, self.args.exp_name)
 
                 if iters % cfg.saveInterval == 0:
                     best_model_info = {'accuracy': best_model_acc, 'psnr': best_model_psnr, 'ssim': best_model_ssim}
-                    self.save_checkpoint(model, epoch, iters, best_history_acc, best_model_info, False, converge_list,
+                    self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, False, converge_list,
                                          self.args.exp_name)
 
 
