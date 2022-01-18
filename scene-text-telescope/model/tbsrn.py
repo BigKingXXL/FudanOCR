@@ -270,7 +270,7 @@ class RecurrentResidualBlock(nn.Module):
 
 class RecurrentResidualBlockSmall(nn.Module):
     def __init__(self, channels):
-        super(RecurrentResidualBlock, self).__init__()
+        super(RecurrentResidualBlockSmall, self).__init__()
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(channels)
         self.gru1 = GruBlock(channels, channels)
