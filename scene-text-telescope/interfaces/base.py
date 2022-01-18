@@ -172,6 +172,8 @@ class TextBase(object):
             image_crit = lapsrn.L1_Charbonnier_loss()
         else:
             raise ValueError
+        print("Resume:")
+        print(self.resume)
         if self.args.arch != 'bicubic':
             model = model.to(self.device)
             image_crit.to(self.device)
