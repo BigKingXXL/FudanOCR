@@ -13,6 +13,9 @@ from datetime import datetime
 from utils.util import str_filt
 from torchvision import transforms
 from utils.metrics import get_str_list
+import wandb
+
+wandb.init(project="BigKingXXL")
 
 to_pil = transforms.ToPILImage()
 
@@ -23,6 +26,14 @@ hard_test_times = 0
 class TextSR(base.TextBase):
     def train(self):
         cfg = self.config.TRAIN
+
+        wandb.config({
+            "lr": self.config.lr,
+            "quantization": self.args.quantize,
+            "quantization_bits": 8,
+            "quantization_method": "DOREFA",
+            "batch size": self.args.batch_size
+        })
         train_dataset, train_loader = self.get_train_data()
         val_dataset_list, val_loader_list = self.get_val_data()
         #teacher_model_dict = self.generator_init()
@@ -70,11 +81,15 @@ class TextSR(base.TextBase):
                 # loss += block_loss(student_image_prediction, teacher_image_prediction)
 
                 global times
-                pbar.set_postfix({
+                performance = {
+                    'epoch': epoch,
                     'loss/mse_loss': mse_loss.item(),
                     'loss/position_loss': attention_loss.item(),
                     'loss/content_loss': recognition_loss.item()
-                })
+                }
+                wandb.log(performance)
+                wandb.watch(student_model, log_freq=100)
+                pbar.set_postfix(performance)
                 # self.writer.add_scalar('loss/mse_loss', mse_loss , times)
                 # self.writer.add_scalar('loss/position_loss', attention_loss, times)
                 # self.writer.add_scalar('loss/content_loss', recognition_loss, times)
@@ -93,7 +108,7 @@ class TextSR(base.TextBase):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
                         #vpbar.set_description_str(data_name)
                         logging.info(f'evaluating {data_name}')
-                        metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name)
+                        metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name, epoch)
                         converge_list.append({'iterator': iters,
                                               'acc': metrics_dict['accuracy'],
                                               'psnr': metrics_dict['psnr_avg'],
@@ -200,6 +215,7 @@ class TextSR(base.TextBase):
             torch.cuda.empty_cache()
         psnr_avg = sum(metric_dict['psnr']) / len(metric_dict['psnr'])
         ssim_avg = sum(metric_dict['ssim']) / len(metric_dict['ssim'])
+        
         logging.info('[{}]\t'
               'loss_rec {:.3f}| loss_im {:.3f}\t'
               'PSNR {:.2f} | SSIM {:.4f}\t'
@@ -211,6 +227,11 @@ class TextSR(base.TextBase):
         psnr_avg = round(psnr_avg.item(), 6)
         ssim_avg = round(ssim_avg.item(), 6)
         logging.info('sr_accuray: %.2f%%' % (accuracy * 100))
+        wandb.log({
+            f"val_{mode}_sr_accuracy": accuracy,
+            f"val_{mode}_psnr": psnr_avg,
+            f"val_{mode}_ssim": ssim_avg
+        })
         metric_dict['accuracy'] = accuracy
         metric_dict['psnr_avg'] = psnr_avg
         metric_dict['ssim_avg'] = ssim_avg
