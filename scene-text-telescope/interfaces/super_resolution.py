@@ -28,7 +28,7 @@ class TextSR(base.TextBase):
         cfg = self.config.TRAIN
 
         wandb.config({
-            "lr": self.config.lr,
+            "lr": cfg.lr,
             "quantization": self.args.quantize,
             "quantization_bits": 8,
             "quantization_method": "DOREFA",
