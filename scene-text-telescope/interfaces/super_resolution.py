@@ -15,7 +15,7 @@ from torchvision import transforms
 from utils.metrics import get_str_list
 import wandb
 
-wandb.init(project="BigKingXXL", entity="bigkingxxl")
+wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
 
 to_pil = transforms.ToPILImage()
 
@@ -41,7 +41,7 @@ class TextSR(base.TextBase):
 
         student_model_dict = self.generator_init(quantized=True)
         student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
-
+        wandb.watch(student_model)
         #block_loss = torch.nn.MSELoss()
 
         aster, aster_info = self.CRNN_init()
