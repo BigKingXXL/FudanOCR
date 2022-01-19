@@ -27,13 +27,13 @@ class TextSR(base.TextBase):
     def train(self):
         cfg = self.config.TRAIN
 
-        wandb.config({
+        wandb.config = {
             "lr": cfg.lr,
             "quantization": self.args.quantize,
             "quantization_bits": 8,
             "quantization_method": "DOREFA",
             "batch size": self.args.batch_size
-        })
+        }
         train_dataset, train_loader = self.get_train_data()
         val_dataset_list, val_loader_list = self.get_val_data()
         #teacher_model_dict = self.generator_init()
