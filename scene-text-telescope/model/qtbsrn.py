@@ -4,11 +4,10 @@ import torch.nn.functional as F
 from torch import nn
 import warnings
 import math, copy
-from bitorch.layers import qlinear, qconv
 from bitorch.layers.qconv import QConv2d_NoAct as BinQConv2d_NoAct
 from bitorch.layers.qlinear import QLinear as BinQLinear
 from bitorch.quantizations import WeightDoReFa
-from tbsrn import *
+from .tbsrn import *
 
 warnings.filterwarnings("ignore")
 

@@ -283,7 +283,7 @@ class TextSR(base.TextBase):
                 images_lr = images_lr.to(self.device)
                 images_hr = images_hr.to(self.device)
                 sr_beigin = time.time()
-                images_sr = model(images_lr)
+                images_sr, _ = model(images_lr)
 
                 # print('srshape',images_sr.shape)
                 # print('hrshape',images_hr.shape)
