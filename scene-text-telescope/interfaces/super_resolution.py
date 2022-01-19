@@ -91,7 +91,8 @@ class TextSR(base.TextBase):
                     current_acc_dict = {}
                     for k, val_loader in (enumerate(val_loader_list)):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
-                        vpbar.set_description_str(data_name)
+                        #vpbar.set_description_str(data_name)
+                        logging.info(f'evaluating {data_name}')
                         metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name)
                         converge_list.append({'iterator': iters,
                                               'acc': metrics_dict['accuracy'],
