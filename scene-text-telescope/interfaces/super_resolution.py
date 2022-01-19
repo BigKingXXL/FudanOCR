@@ -89,7 +89,7 @@ class TextSR(base.TextBase):
 
                 if iters % cfg.VAL.valInterval == 0:
                     current_acc_dict = {}
-                    for k, val_loader in (enumerate(vpbar := tqdm(val_loader_list))):
+                    for k, val_loader in (enumerate(val_loader_list)):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
                         vpbar.set_description_str(data_name)
                         metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name)
@@ -105,12 +105,12 @@ class TextSR(base.TextBase):
 
                             best_history_acc[data_name] = float(acc)
                             best_history_acc['epoch'] = epoch
-                            pbar.set_postfix({data_name: best_history_acc[data_name]})
-                            #logging.info('best_%s = %.2f%%*' % (data_name, best_history_acc[data_name] * 100))
+                            #pbar.set_postfix({data_name: best_history_acc[data_name]})
+                            logging.info('best_%s = %.2f%%*' % (data_name, best_history_acc[data_name] * 100))
 
                         else:
-                            pbar.set_postfix({data_name: best_history_acc[data_name]})
-                            #logging.info('best_%s = %.2f%%' % (data_name, best_history_acc[data_name] * 100))
+                            #pbar.set_postfix({data_name: best_history_acc[data_name]})
+                            logging.info('best_%s = %.2f%%' % (data_name, best_history_acc[data_name] * 100))
                     if sum(current_acc_dict.values()) > best_acc:
                         best_acc = sum(current_acc_dict.values())
                         best_model_acc = current_acc_dict
