@@ -108,7 +108,7 @@ class TextSR(base.TextBase):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
                         #vpbar.set_description_str(data_name)
                         logging.info(f'evaluating {data_name}')
-                        metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name, epoch)
+                        metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name)
                         converge_list.append({'iterator': iters,
                                               'acc': metrics_dict['accuracy'],
                                               'psnr': metrics_dict['psnr_avg'],
