@@ -48,7 +48,7 @@ class TextSR(base.TextBase):
         converge_list = []
 
         for epoch in range(cfg.epochs):
-            for j, data in (pbar := tqdm((enumerate(train_loader)))):
+            for j, data in ((enumerate(pbar := tqdm(train_loader)))):
                 # teacher_model.eval()
                 student_model.train()
                 for p in student_model.parameters():
@@ -89,7 +89,7 @@ class TextSR(base.TextBase):
 
                 if iters % cfg.VAL.valInterval == 0:
                     current_acc_dict = {}
-                    for k, val_loader in (vpbar := tqdm(enumerate(val_loader_list))):
+                    for k, val_loader in (enumerate(vpbar := tqdm(val_loader_list))):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
                         vpbar.set_description_str(data_name)
                         metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name)
