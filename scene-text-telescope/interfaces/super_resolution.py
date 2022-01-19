@@ -83,6 +83,7 @@ class TextSR(base.TextBase):
                 global times
                 performance = {
                     'epoch': epoch,
+                    'loss/loss': loss.item(),
                     'loss/mse_loss': mse_loss.item(),
                     'loss/position_loss': attention_loss.item(),
                     'loss/content_loss': recognition_loss.item()
@@ -127,6 +128,7 @@ class TextSR(base.TextBase):
                         else:
                             #pbar.set_postfix({data_name: best_history_acc[data_name]})
                             logging.info('best_%s = %.2f%%' % (data_name, best_history_acc[data_name] * 100))
+                    wandb.log()
                     if sum(current_acc_dict.values()) > best_acc:
                         best_acc = sum(current_acc_dict.values())
                         best_model_acc = current_acc_dict
@@ -228,10 +230,10 @@ class TextSR(base.TextBase):
         ssim_avg = round(ssim_avg.item(), 6)
         logging.info('sr_accuray: %.2f%%' % (accuracy * 100))
         wandb.log({
-            f"val_{mode}_sr_accuracy": accuracy,
-            f"val_{mode}_psnr": psnr_avg,
-            f"val_{mode}_ssim": ssim_avg
-        })
+            f"val_sr_accuracy": { mode: accuracy },
+            f"val_psnr": { mode: psnr_avg },
+            f"val_ssim": { mode: ssim_avg }
+        }, commit=False)
         metric_dict['accuracy'] = accuracy
         metric_dict['psnr_avg'] = psnr_avg
         metric_dict['ssim_avg'] = ssim_avg
