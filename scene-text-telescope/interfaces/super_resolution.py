@@ -88,7 +88,6 @@ class TextSR(base.TextBase):
                     'loss/position_loss': attention_loss.item(),
                     'loss/content_loss': recognition_loss.item()
                 }
-                wandb.log(performance)
                 wandb.watch(student_model, log_freq=100)
                 pbar.set_postfix(performance)
                 # self.writer.add_scalar('loss/mse_loss', mse_loss , times)
@@ -128,7 +127,6 @@ class TextSR(base.TextBase):
                         else:
                             #pbar.set_postfix({data_name: best_history_acc[data_name]})
                             logging.info('best_%s = %.2f%%' % (data_name, best_history_acc[data_name] * 100))
-                    wandb.log()
                     if sum(current_acc_dict.values()) > best_acc:
                         best_acc = sum(current_acc_dict.values())
                         best_model_acc = current_acc_dict
@@ -140,6 +138,7 @@ class TextSR(base.TextBase):
                         self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, True,
                                              converge_list, self.args.exp_name)
 
+                wandb.log(performance)
                 if iters % cfg.saveInterval == 0:
                     best_model_info = {'accuracy': best_model_acc, 'psnr': best_model_psnr, 'ssim': best_model_ssim}
                     self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, False, converge_list,
@@ -230,9 +229,9 @@ class TextSR(base.TextBase):
         ssim_avg = round(ssim_avg.item(), 6)
         logging.info('sr_accuray: %.2f%%' % (accuracy * 100))
         wandb.log({
-            f"val_sr_accuracy": { mode: accuracy },
-            f"val_psnr": { mode: psnr_avg },
-            f"val_ssim": { mode: ssim_avg }
+            f"val_{mode}_sr_accuracy": accuracy,
+            f"val_{mode}_psnr": psnr_avg,
+            f"val_{mode}_ssim": ssim_avg
         }, commit=False)
         metric_dict['accuracy'] = accuracy
         metric_dict['psnr_avg'] = psnr_avg
