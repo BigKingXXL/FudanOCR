@@ -15,7 +15,7 @@ from torchvision import transforms
 from utils.metrics import get_str_list
 import wandb
 
-wandb.init(project="BigKingXXL")
+wandb.init(project="BigKingXXL", entity="bigkingxxl")
 
 to_pil = transforms.ToPILImage()
 
