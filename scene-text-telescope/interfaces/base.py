@@ -189,15 +189,15 @@ class TextBase(object):
                 self.logging.info('loading pre-trained model from %s ' % self.resume)
                 if self.config.TRAIN.ngpu == 1:
                     weights = torch.load(self.resume)['state_dict_G']
-                    if quantized:
-                        for key in ["block2.conv1.bias", "block2.conv2.bias", "block3.conv1.bias", "block3.conv2.bias", "block4.conv1.bias", "block4.conv2.bias", "block5.conv1.bias", "block5.conv2.bias", "block6.conv1.bias", "block6.conv2.bias"]:
-                            del weights[key]
+                    # if quantized:
+                    #     for key in ["block2.conv1.bias", "block2.conv2.bias", "block3.conv1.bias", "block3.conv2.bias", "block4.conv1.bias", "block4.conv2.bias", "block5.conv1.bias", "block5.conv2.bias", "block6.conv1.bias", "block6.conv2.bias"]:
+                    #         del weights[key]
                     model.load_state_dict(weights)
                 else:
                     weights = {'module.' + k: v for k, v in torch.load(self.resume)['state_dict_G'].items()}
-                    if quantized:
-                        for key in ["module.block2.conv1.bias", "module.block2.conv2.bias", "module.block3.conv1.bias", "module.block3.conv2.bias", "module.block4.conv1.bias", "module.block4.conv2.bias", "module.block5.conv1.bias", "module.block5.conv2.bias", "module.block6.conv1.bias", "module.block6.conv2.bias"]:
-                            del weights[key]
+                    # if quantized:
+                    #     for key in ["module.block2.conv1.bias", "module.block2.conv2.bias", "module.block3.conv1.bias", "module.block3.conv2.bias", "module.block4.conv1.bias", "module.block4.conv2.bias", "module.block5.conv1.bias", "module.block5.conv2.bias", "module.block6.conv1.bias", "module.block6.conv2.bias"]:
+                    #         del weights[key]
                     model.load_state_dict(weights)
         para_num = get_parameter_number(model)
 
