@@ -5,12 +5,12 @@ TRAIN:
     './dataset/mydata/train1',
     './dataset/mydata/train2',
   ]
-  batch_size: 512
+  batch_size: 10
   width: 128
   height: 32
   epochs: 50000
   cuda: True
-  ngpu: 4
+  ngpu: 1
   workers: 8
   resume: ''
   ckpt_dir: './ckpt/'
