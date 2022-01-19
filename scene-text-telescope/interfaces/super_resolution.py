@@ -71,9 +71,9 @@ class TextSR(base.TextBase):
 
                 global times
                 pbar.set_postfix({
-                    'loss/mse_loss': mse_loss,
-                    'loss/position_loss': attention_loss,
-                    'loss/content_loss': recognition_loss
+                    'loss/mse_loss': mse_loss.item(),
+                    'loss/position_loss': attention_loss.item(),
+                    'loss/content_loss': recognition_loss.item()
                 })
                 # self.writer.add_scalar('loss/mse_loss', mse_loss , times)
                 # self.writer.add_scalar('loss/position_loss', attention_loss, times)
