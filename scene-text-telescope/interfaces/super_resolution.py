@@ -88,7 +88,6 @@ class TextSR(base.TextBase):
                     'loss/position_loss': attention_loss.item(),
                     'loss/content_loss': recognition_loss.item()
                 }
-                wandb.watch(student_model, log_freq=100)
                 pbar.set_postfix(performance)
                 # self.writer.add_scalar('loss/mse_loss', mse_loss , times)
                 # self.writer.add_scalar('loss/position_loss', attention_loss, times)
