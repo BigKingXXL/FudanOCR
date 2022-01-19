@@ -10,7 +10,7 @@ TRAIN:
   height: 32
   epochs: 50000
   cuda: True
-  ngpu: 1
+  ngpu: 4
   workers: 8
   resume: ''
   ckpt_dir: './ckpt/'

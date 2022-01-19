@@ -194,8 +194,11 @@ class TextBase(object):
                             del weights[key]
                     model.load_state_dict(weights)
                 else:
-                    model.load_state_dict(
-                        {'module.' + k: v for k, v in torch.load(self.resume)['state_dict_G'].items()})
+                    weights = {'module.' + k: v for k, v in torch.load(self.resume)['state_dict_G'].items()}
+                    if quantized:
+                        for key in ["module.block2.conv1.bias", "module.block2.conv2.bias", "module.block3.conv1.bias", "module.block3.conv2.bias", "module.block4.conv1.bias", "module.block4.conv2.bias", "module.block5.conv1.bias", "module.block5.conv2.bias", "module.block6.conv1.bias", "module.block6.conv2.bias"]:
+                            del weights[key]
+                    model.load_state_dict(weights)
         para_num = get_parameter_number(model)
 
         para_num = get_parameter_number(model)
