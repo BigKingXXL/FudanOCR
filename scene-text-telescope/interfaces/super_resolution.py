@@ -1,31 +1,18 @@
 import os
-import cv2
-import sys
 import time
-import math
 import copy
 import torch
-import pickle
-import shutil
 import random
 import logging
 import numpy as np
-import torchvision
 from PIL import Image
 from tqdm import tqdm
-import torch.nn as nn
 from IPython import embed
 from interfaces import base
-from utils import utils_moran
 from datetime import datetime
 from utils.util import str_filt
-from time import gmtime, strftime
-from utils import util, ssim_psnr
 from torchvision import transforms
-from torch.autograd import Variable
-from utils.meters import AverageMeter
-from utils.metrics import get_str_list, Accuracy
-from torch.utils.tensorboard import SummaryWriter
+from utils.metrics import get_str_list
 
 to_pil = transforms.ToPILImage()
 
@@ -38,13 +25,13 @@ class TextSR(base.TextBase):
         cfg = self.config.TRAIN
         train_dataset, train_loader = self.get_train_data()
         val_dataset_list, val_loader_list = self.get_val_data()
-        teacher_model_dict = self.generator_init()
-        teacher_model, teachere_image_crit = teacher_model_dict['model'], teacher_model_dict['crit']
+        #teacher_model_dict = self.generator_init()
+        #teacher_model, teachere_image_crit = teacher_model_dict['model'], teacher_model_dict['crit']
 
         student_model_dict = self.generator_init(quantized=True)
         student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
 
-        block_loss = torch.nn.MSELoss()
+        #block_loss = torch.nn.MSELoss()
 
         aster, aster_info = self.CRNN_init()
         student_optimizer_G = self.optimizer_init(student_model)
@@ -61,8 +48,8 @@ class TextSR(base.TextBase):
         converge_list = []
 
         for epoch in range(cfg.epochs):
-            for j, data in (enumerate(train_loader)):
-                teacher_model.eval()
+            for j, data in (pbar := tqdm((enumerate(train_loader)))):
+                # teacher_model.eval()
                 student_model.train()
                 for p in student_model.parameters():
                     p.requires_grad = True
@@ -72,20 +59,25 @@ class TextSR(base.TextBase):
                 images_lr = images_lr.to(self.device)
                 images_hr = images_hr.to(self.device)
 
-                teacher_image_prediction, teacher_blocks = teacher_model(images_lr)
+                #teacher_image_prediction, teacher_blocks = teacher_model(images_lr)
                 student_image_prediction, student_blocks = student_model(images_lr)
 
                 loss, mse_loss, attention_loss, recognition_loss = student_image_crit(student_image_prediction, images_hr, label_strs)
 
-                for key in student_blocks.keys():
-                    loss += block_loss(student_blocks[key], teacher_blocks[key])
+                #for key in student_blocks.keys():
+                #    loss += block_loss(student_blocks[key], teacher_blocks[key])
 
-                loss += block_loss(student_image_prediction, teacher_image_prediction)
+                # loss += block_loss(student_image_prediction, teacher_image_prediction)
 
                 global times
-                self.writer.add_scalar('loss/mse_loss', mse_loss , times)
-                self.writer.add_scalar('loss/position_loss', attention_loss, times)
-                self.writer.add_scalar('loss/content_loss', recognition_loss, times)
+                pbar.set_postfix({
+                    'loss/mse_loss': mse_loss,
+                    'loss/position_loss': attention_loss,
+                    'loss/content_loss': recognition_loss
+                })
+                # self.writer.add_scalar('loss/mse_loss', mse_loss , times)
+                # self.writer.add_scalar('loss/position_loss', attention_loss, times)
+                # self.writer.add_scalar('loss/content_loss', recognition_loss, times)
                 times += 1
 
                 loss_im = loss * 100
@@ -95,29 +87,11 @@ class TextSR(base.TextBase):
                 torch.nn.utils.clip_grad_norm_(student_model.parameters(), 0.25)
                 student_optimizer_G.step()
 
-                if iters % cfg.displayInterval == 0:
-                    logging.info('[{}]\t'
-                          'Epoch: [{}][{}/{}]\t'
-                          # 'vis_dir={:s}\t'
-                          'total_loss {:.3f} \t'
-                          'mse_loss {:.3f} \t'
-                          'attention_loss {:.3f} \t'
-                          'recognition_loss {:.3f} \t'
-                          .format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                  epoch, j + 1, len(train_loader),
-                                  # self.vis_dir,
-                                  float(loss_im.data),
-                                  mse_loss,
-                                  attention_loss,
-                                  recognition_loss
-                                  ))
-
                 if iters % cfg.VAL.valInterval == 0:
-                    logging.info('======================================================')
                     current_acc_dict = {}
-                    for k, val_loader in enumerate(val_loader_list):
+                    for k, val_loader in (vpbar := tqdm(enumerate(val_loader_list))):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
-                        logging.info('evaling %s' % data_name)
+                        vpbar.set_description_str(data_name)
                         metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name)
                         converge_list.append({'iterator': iters,
                                               'acc': metrics_dict['accuracy'],
@@ -131,10 +105,12 @@ class TextSR(base.TextBase):
 
                             best_history_acc[data_name] = float(acc)
                             best_history_acc['epoch'] = epoch
-                            logging.info('best_%s = %.2f%%*' % (data_name, best_history_acc[data_name] * 100))
+                            pbar.set_postfix({data_name: best_history_acc[data_name]})
+                            #logging.info('best_%s = %.2f%%*' % (data_name, best_history_acc[data_name] * 100))
 
                         else:
-                            logging.info('best_%s = %.2f%%' % (data_name, best_history_acc[data_name] * 100))
+                            pbar.set_postfix({data_name: best_history_acc[data_name]})
+                            #logging.info('best_%s = %.2f%%' % (data_name, best_history_acc[data_name] * 100))
                     if sum(current_acc_dict.values()) > best_acc:
                         best_acc = sum(current_acc_dict.values())
                         best_model_acc = current_acc_dict
