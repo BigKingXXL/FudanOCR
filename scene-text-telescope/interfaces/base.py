@@ -1,29 +1,24 @@
 import os
-import cv2
 import sys
-import math
 import torch
 import shutil
 import string
 import logging
 import torchvision
 from PIL import Image
-from tqdm import tqdm
 import torch.nn as nn
-from IPython import embed
 import torch.optim as optim
 from torchvision import transforms
-from torch.autograd import Variable
 from collections import OrderedDict
 from torch.utils.tensorboard import SummaryWriter
 
 from model import tbsrn, tsrn, edsr, srcnn, srresnet, crnn
 import dataset.dataset as dataset
-from dataset import lmdbDataset, alignCollate_real, ConcatDataset, lmdbDataset_real, alignCollate_syn, lmdbDataset_mix
-from loss import gradient_loss, percptual_loss, text_focus_loss
+from dataset import lmdbDataset, alignCollate_real, lmdbDataset_real, alignCollate_syn, lmdbDataset_mix
+from loss import text_focus_loss
 from model.qtbsrn import QTBSRN
-from utils import util, ssim_psnr, utils_moran, utils_crnn
-from utils.labelmaps import get_vocabulary, labels2strs
+from utils import ssim_psnr, utils_moran, utils_crnn
+from utils.labelmaps import get_vocabulary
 
 
 def get_parameter_number(net):
