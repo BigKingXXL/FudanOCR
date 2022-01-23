@@ -142,6 +142,8 @@ class TextSR(base.TextBase):
                     best_model_info = {'accuracy': best_model_acc, 'psnr': best_model_psnr, 'ssim': best_model_ssim}
                     self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, False, converge_list,
                                          self.args.exp_name)
+            self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, True,
+                                             converge_list, self.args.exp_name, True)
 
 
     def get_crnn_pred(self, outputs):

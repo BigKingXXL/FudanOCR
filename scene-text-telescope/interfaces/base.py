@@ -262,7 +262,7 @@ class TextBase(object):
                     torchvision.utils.save_image(vis_im, os.path.join(out_root, im_name), padding=0)
         return visualized
 
-    def save_checkpoint(self, netG, epoch, iters, best_acc_dict, best_model_info, is_best, converge_list, exp_name):
+    def save_checkpoint(self, netG, epoch, iters, best_acc_dict, best_model_info, is_best, converge_list, exp_name, epoch_save=False):
         # ckpt_path = os.path.join('checkpoint', exp_name, self.vis_dir)
         ckpt_path = os.path.join('checkpoint', exp_name)
         if not os.path.exists(ckpt_path):
@@ -276,6 +276,8 @@ class TextBase(object):
             'param_num': sum([param.nelement() for param in netG.module.parameters()]),
             'converge': converge_list
         }
+        if epoch_save:
+            torch.save(save_dict, os.path.join(ckpt_path, f'epoch{epoch}_.pth'))
         if is_best:
             torch.save(save_dict, os.path.join(ckpt_path, 'model_best.pth'))
         else:
