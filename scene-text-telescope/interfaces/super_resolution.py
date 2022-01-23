@@ -39,7 +39,7 @@ class TextSR(base.TextBase):
         #teacher_model_dict = self.generator_init()
         #teacher_model, teachere_image_crit = teacher_model_dict['model'], teacher_model_dict['crit']
 
-        student_model_dict = self.generator_init(quantized=True)
+        student_model_dict = self.generator_init(quantized=self.args.quantize)
         student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
         wandb.watch(student_model)
         #block_loss = torch.nn.MSELoss()
