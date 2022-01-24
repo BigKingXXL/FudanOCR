@@ -197,7 +197,7 @@ class PositionwiseFeedForward(nn.Module):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
 class TBSRN(nn.Module):
-    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=8, mask=False, hidden_units=32, input_channel=3, small=False, quantize_static=False):
+    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3, small=False, quantize_static=False):
         super(TBSRN, self).__init__()
 
         self.quantize = quantize_static
