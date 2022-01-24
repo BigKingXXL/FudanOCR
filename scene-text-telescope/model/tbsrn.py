@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch import nn
 import warnings
 import math, copy
+from torch.quantization import QuantStub, DeQuantStub
 
 warnings.filterwarnings("ignore")
 
@@ -158,13 +159,16 @@ class PositionwiseFeedForward(nn.Module):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
 class TBSRN(nn.Module):
-    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3, small=False):
+    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3, small=False, quantize_static=False):
         super(TBSRN, self).__init__()
 
+        self.quantize = quantize_static
         self.conv = nn.Conv2d(input_channel, 3,3,1,1)
         self.bn = nn.BatchNorm2d(3)
         self.relu = nn.ReLU()
-
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.f_add = torch.nn.quantized.FloatFunctional()
         in_planes = 3
         if mask:
             in_planes = 4
@@ -210,6 +214,8 @@ class TBSRN(nn.Module):
                 activation='none')
 
     def forward(self, x):
+        if self.quantize:
+            x = self.quant(x)
         if self.stn and self.training:
             # x = F.interpolate(x, self.tps_inputsize, mode='bilinear', align_corners=True)
             _, ctrl_points_x = self.stn_head(x)
@@ -223,8 +229,13 @@ class TBSRN(nn.Module):
             block[str(i + 2)] = getattr(self, 'block%d' % (i + 2))(block[str(i + 1)])
 
         # apply the upsample blocks to the sum of the first block + output of the MHA blocks
-        block[str(self.srb_nums + 3)] = getattr(self, 'block%d' % (self.srb_nums + 3))((block['1'] + block[str(self.srb_nums + 2)]))
+        if self.quantize:    
+            block[str(self.srb_nums + 3)] = getattr(self, 'block%d' % (self.srb_nums + 3))(self.f_add.add(block['1'], block[str(self.srb_nums + 2)]))
+        else:
+            block[str(self.srb_nums + 3)] = getattr(self, 'block%d' % (self.srb_nums + 3))((block['1'] + block[str(self.srb_nums + 2)]))
         output = torch.tanh(block[str(self.srb_nums + 3)])
+        if self.quantize:
+            output = self.dequant(output)
         return output, block
 
 

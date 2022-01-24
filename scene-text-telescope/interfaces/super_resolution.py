@@ -250,10 +250,43 @@ class TextSR(base.TextBase):
 
         return metric_dict
 
-    def test(self):
-        model_dict = self.generator_init()
+    def print_size_of_model(self, model):
+        torch.save(model.state_dict(), "temp.p")
+        print('Size (MB):', os.path.getsize("temp.p")/1e6)
+        os.remove('temp.p')
+
+    def test(self, quantize_static=False):
+        model_dict = self.generator_init(quantize_static=quantize_static)
         model, image_crit = model_dict['model'], model_dict['crit']
         items = os.listdir(self.test_data_dir)
+
+        if quantize_static:
+            model.eval()
+            self.print_size_of_model(model)
+            model.qconfig = torch.quantization.default_qconfig
+            print(model.qconfig)
+            torch.quantization.prepare(model, inplace=True)
+            counter = 0
+            for test_dir in items:
+                test_data, test_loader = self.get_test_data(os.path.join(self.test_data_dir, test_dir))
+                for i, data in (enumerate(test_loader)):
+                    print(f"Calibration batch {counter}")
+                    if counter > 32:
+                        break
+                    images_hr, images_lr, label_strs = data
+                    val_batch_size = images_lr.shape[0]
+                    images_lr = images_lr.to(self.device)
+                    images_hr = images_hr.to(self.device)
+                    sr_beigin = time.time()
+                    images_sr, _ = model(images_lr)
+                    counter+=1
+
+                if counter > 32:
+                    break
+
+            torch.quantization.convert(model, inplace=True)
+            self.print_size_of_model(model)
+
         for test_dir in items:
             test_data, test_loader = self.get_test_data(os.path.join(self.test_data_dir, test_dir))
             data_name = self.args.test_data_dir.split('/')[-1]

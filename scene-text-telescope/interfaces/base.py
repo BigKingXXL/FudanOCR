@@ -131,15 +131,15 @@ class TextBase(object):
             drop_last=False)
         return test_dataset, test_loader
 
-    def generator_init(self, small=False, quantized=False):
+    def generator_init(self, small=False, quantized=False, quantize_static=False):
         cfg = self.config.TRAIN
         if self.args.arch == 'tbsrn':
             if quantized:
                 model = QTBSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
                                 STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u)
             else:
-                model = tbsrn.TBSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
-                                STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u, small=small)
+               model = tbsrn.TBSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
+                                STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u, small=small, quantize_static=quantize_static)
             image_crit = text_focus_loss.TextFocusLoss(self.args)
         elif self.args.arch == 'tsrn':
             model = tsrn.TSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,

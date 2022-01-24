@@ -8,7 +8,7 @@ from interfaces.super_resolution import TextSR
 def main(config, args):
     Mission = TextSR(config, args)
     if args.test:
-        Mission.test()
+        Mission.test(quantize_static=args.quantize_static)
     elif args.demo:
         Mission.demo()
     else:
@@ -34,6 +34,7 @@ if __name__ == '__main__':
     parser.add_argument('--demo', action='store_true', default=False)
     parser.add_argument('--demo_dir', type=str, default='./demo')
     parser.add_argument('--quantize', action='store_true')
+    parser.add_argument('--quantize_static', action='store_true')
     args = parser.parse_args()
     config_path = os.path.join('config', 'super_resolution.yaml')
     config = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)
