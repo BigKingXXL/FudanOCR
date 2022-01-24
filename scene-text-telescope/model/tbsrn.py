@@ -197,7 +197,7 @@ class PositionwiseFeedForward(nn.Module):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
 class TBSRN(nn.Module):
-    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3, small=False, quantize_static=False):
+    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=8, mask=False, hidden_units=32, input_channel=3, small=False, quantize_static=False):
         super(TBSRN, self).__init__()
 
         self.quantize = quantize_static
@@ -221,7 +221,7 @@ class TBSRN(nn.Module):
         self.srb_nums = srb_nums
         if not small:
             for i in range(srb_nums):
-                setattr(self, 'block%d' % (i + 2), RecurrentResidualBlock(2 * hidden_units))
+                setattr(self, 'block%d' % (i + 2), Block(2 * hidden_units))
         else:
             for i in range(srb_nums):
                 setattr(self, 'block%d' % (i + 2), RecurrentResidualBlockSmall(2 * hidden_units))
@@ -253,21 +253,21 @@ class TBSRN(nn.Module):
                 activation='none')
 
     def forward(self, x):
-        print("Size in beginning of forward: ", x.size())
-        resnext = self.resnext_block(x)
-        print("Size after block", resnext.size())
+        # print("Size in beginning of forward: ", x.size())
+        # resnext = self.resnext_block(x)
+        # print("Size after block", resnext.size())
         if self.quantize:
             x = self.quant(x)
         if self.stn and self.training:
             # x = F.interpolate(x, self.tps_inputsize, mode='bilinear', align_corners=True)
             _, ctrl_points_x = self.stn_head(x)
             x, _ = self.tps(x, ctrl_points_x)
-        print("Size after stn: ", x.size())
+        # print("Size after stn: ", x.size())
         
 
         #apply first block
         block = {'1': self.block1(x)}
-        print("Size after first block: ", block["1"].size())
+        # print("Size after first block: ", block["1"].size())
 
         #apply second to sixth block
         for i in range(self.srb_nums + 1):
@@ -281,7 +281,7 @@ class TBSRN(nn.Module):
         output = torch.tanh(block[str(self.srb_nums + 3)])
         if self.quantize:
             output = self.dequant(output)
-        print("Size at end of forward: ", output.size())
+        # print("Size at end of forward: ", output.size())
         return output, block
 
 
