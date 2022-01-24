@@ -59,7 +59,9 @@ class TextSR(base.TextBase):
         converge_list = []
 
         for epoch in range(cfg.epochs):
-            for j, data in ((enumerate(pbar := tqdm(train_loader)))):
+            pbar = tqdm(total=len(train_loader))
+            for j, data in enumerate(train_loader):
+                pbar.update()
                 # teacher_model.eval()
                 student_model.train()
                 for p in student_model.parameters():
@@ -144,6 +146,7 @@ class TextSR(base.TextBase):
                                          self.args.exp_name)
             self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, True,
                                              converge_list, self.args.exp_name, True)
+            pbar.close()
 
 
     def get_crnn_pred(self, outputs):
