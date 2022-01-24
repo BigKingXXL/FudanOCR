@@ -221,7 +221,7 @@ class TBSRN(nn.Module):
         self.srb_nums = srb_nums
         if not small:
             for i in range(srb_nums):
-                setattr(self, 'block%d' % (i + 2), Block(2 * hidden_units))
+                setattr(self, 'block%d' % (i + 2), RecurrentResidualBlock(2 * hidden_units))
         else:
             for i in range(srb_nums):
                 setattr(self, 'block%d' % (i + 2), RecurrentResidualBlockSmall(2 * hidden_units))
@@ -288,14 +288,16 @@ class TBSRN(nn.Module):
 class RecurrentResidualBlock(nn.Module):
     def __init__(self, channels):
         super(RecurrentResidualBlock, self).__init__()
-        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        #self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.conv1 = Block(channels)
         self.bn1 = nn.BatchNorm2d(channels)
         self.gru1 = GruBlock(channels, channels)
         # self.prelu = nn.ReLU()
 
         #------ we could try to remove this
         self.prelu = mish()
-        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        #self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.conv2 = Block(channels)
         self.bn2 = nn.BatchNorm2d(channels)
         self.gru2 = GruBlock(channels, channels)
         #------
@@ -309,9 +311,11 @@ class RecurrentResidualBlock(nn.Module):
     def forward(self, x):
         residual = self.conv1(x)
         residual = self.bn1(residual)
+        residual = self.gru1(residual)
         residual = self.prelu(residual)
         residual = self.conv2(residual)
         residual = self.bn2(residual)
+        residual = self.gru2(residual)
 
         size = residual.shape
         residual = residual.view(size[0],size[1],-1)
