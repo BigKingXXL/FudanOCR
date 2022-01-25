@@ -207,7 +207,7 @@ class TBSRN(nn.Module):
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.f_add = torch.nn.quantized.FloatFunctional()
-        self.resnext_block = Block(3)
+
         in_planes = 3
         if mask:
             in_planes = 4
@@ -288,16 +288,16 @@ class TBSRN(nn.Module):
 class RecurrentResidualBlock(nn.Module):
     def __init__(self, channels):
         super(RecurrentResidualBlock, self).__init__()
-        #self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        self.conv1 = Block(channels)
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        #self.conv1 = Block(channels)
         self.bn1 = nn.BatchNorm2d(channels)
         self.gru1 = GruBlock(channels, channels)
         # self.prelu = nn.ReLU()
 
         #------ we could try to remove this
         self.prelu = mish()
-        #self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        self.conv2 = Block(channels)
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        #self.conv2 = Block(channels)
         self.bn2 = nn.BatchNorm2d(channels)
         self.gru2 = GruBlock(channels, channels)
         #------
