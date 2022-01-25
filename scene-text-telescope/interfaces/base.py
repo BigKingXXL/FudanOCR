@@ -21,8 +21,8 @@ from model.qtbsrn import QTBSRN
 from utils import ssim_psnr, utils_moran, utils_crnn
 from utils.labelmaps import get_vocabulary
 
-from aciq import *
-from q_utils import *
+from interfaces.aciq import *
+from interfaces.q_utils import *
 
 
 def get_parameter_number(net):
