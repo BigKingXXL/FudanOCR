@@ -62,5 +62,5 @@ def find_clip_aciq(values, num_bits):
     mse_laplace = mse_histogram_clip(bin_x, bin_y, num_bits, alpha_l)
 
     alpha_best = alpha_g if mse_gauss < mse_laplace else alpha_l
-    print(" ACIQ alpha_best = %7.4f / %7.4f" % (alpha_best, max_abs))
+    #print(" ACIQ alpha_best = %7.4f / %7.4f" % (alpha_best, max_abs))
     return alpha_best
