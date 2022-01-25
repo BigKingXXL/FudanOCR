@@ -209,7 +209,7 @@ class TextBase(object):
                 print("Compressing to "+str(bits)+" bits using "+str(qat_method))
 
                 if (qat_method == 'lq') or (qat_method == 'aciq'):
-                    for key, value in self.model.named_parameters():
+                    for key, value in model.named_parameters():
                         uncompressed_size += value.data.element_size() * 8 * value.data.numel()
                         all_w_count += value.data.numel()
                         print(key)
@@ -240,7 +240,7 @@ class TextBase(object):
                                 # print(q_weight_np)
                     
                                 # update weight
-                                value.data = torch.tensor(q_weight_np).to(self.args.device)
+                                value.data = torch.tensor(q_weight_np).to(self.device)
                                 compressed_size += bits * value.data.numel()
                         else:
                             compressed_size += value.data.element_size() * 8 * value.data.numel()
