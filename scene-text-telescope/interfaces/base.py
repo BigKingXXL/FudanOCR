@@ -6,6 +6,7 @@ import string
 import logging
 import torchvision
 from PIL import Image
+import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import transforms
@@ -19,6 +20,9 @@ from loss import text_focus_loss
 from model.qtbsrn import QTBSRN
 from utils import ssim_psnr, utils_moran, utils_crnn
 from utils.labelmaps import get_vocabulary
+
+from aciq import *
+from q_utils import *
 
 
 def get_parameter_number(net):
@@ -187,13 +191,60 @@ class TextBase(object):
                     # if quantized:
                     #     for key in ["block2.conv1.bias", "block2.conv2.bias", "block3.conv1.bias", "block3.conv2.bias", "block4.conv1.bias", "block4.conv2.bias", "block5.conv1.bias", "block5.conv2.bias", "block6.conv1.bias", "block6.conv2.bias"]:
                     #         del weights[key]
-                    model.load_state_dict(weights)
+                    #model.load_state_dict(weights)
                 else:
                     weights = {'module.' + k: v for k, v in torch.load(self.resume)['state_dict_G'].items()}
                     # if quantized:
                     #     for key in ["module.block2.conv1.bias", "module.block2.conv2.bias", "module.block3.conv1.bias", "module.block3.conv2.bias", "module.block4.conv1.bias", "module.block4.conv2.bias", "module.block5.conv1.bias", "module.block5.conv2.bias", "module.block6.conv1.bias", "module.block6.conv2.bias"]:
                     #         del weights[key]
-                    model.load_state_dict(weights)
+                model.load_state_dict(weights)
+
+                bits = 8
+                uncompressed_size = 0
+                compressed_size = 0
+                all_w_count = 0
+                qat_w_count = 0
+                qat_method = 'aciq'
+
+                print("Compressing to "+str(bits)+" bits using "+str(qat_method))
+
+                if (qat_method == 'lq') or (qat_method == 'aciq'):
+                    for key, value in self.model.named_parameters():
+                        uncompressed_size += value.data.element_size() * 8 * value.data.numel()
+                        all_w_count += value.data.numel()
+                        print(key)
+                        quantization_keys = [
+                            'dense',
+                        ]
+                        if value.requires_grad and (any(name in key for name in quantization_keys)):
+                            print('compressing ' + key + ' ' + str(value.shape) + ' to ' + str(bits) + 'bits using ' + qat_method)
+                            weight_np = value.data.cpu().detach().numpy()
+                            qat_w_count += value.data.numel()
+                            # print(weight_np)
+                            if qat_method == 'lq' or qat_method == 'aciq':
+                                # obtain value range
+                                params_min_q_val, params_max_q_val = get_quantized_range(bits, signed=True)
+                                # find clip threshold
+                                if qat_method == 'lq':  # fix threshold
+                                    clip_max_abs = np.max(np.abs(weight_np))
+                                elif qat_method == 'aciq':  # calculate threshold
+                                    values = weight_np.flatten().copy()
+                                    clip_max_abs = find_clip_aciq(values, bits)
+                    
+                                # quantize weights
+                                w_scale = symmetric_linear_quantization_scale_factor(bits, clip_max_abs)
+                                q_weight_np = linear_quantize_clamp(weight_np, w_scale, params_min_q_val, params_max_q_val, inplace=False)
+                    
+                                # dequantize/rescale
+                                q_weight_np = linear_dequantize(q_weight_np, w_scale)
+                                # print(q_weight_np)
+                    
+                                # update weight
+                                value.data = torch.tensor(q_weight_np).to(self.args.device)
+                                compressed_size += bits * value.data.numel()
+                        else:
+                            compressed_size += value.data.element_size() * 8 * value.data.numel()
+                
         para_num = get_parameter_number(model)
 
         para_num = get_parameter_number(model)
