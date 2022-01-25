@@ -23,6 +23,8 @@ from utils.labelmaps import get_vocabulary
 
 from interfaces.aciq import *
 from interfaces.q_utils import *
+from interfaces.ocs import *
+from interfaces.clip import *
 
 
 def get_parameter_number(net):
@@ -206,9 +208,9 @@ class TextBase(object):
                 qat_w_count = 0
                 qat_method = 'aciq'
 
-                #print("Compressing to "+str(bits)+" bits using "+str(qat_method))
+                method = 'ocs'
 
-                if (qat_method == 'lq') or (qat_method == 'aciq'):
+                if method == 'aciq':
                     for key, value in model.named_parameters():
                         if 'gru' not in key:
                             uncompressed_size += value.data.element_size() * 8 * value.data.numel()
@@ -226,33 +228,116 @@ class TextBase(object):
                             weight_np = value.data.cpu().detach().numpy()
                             qat_w_count += value.data.numel()
                             # print(weight_np)
-                            if qat_method == 'lq' or qat_method == 'aciq':
-                                # obtain value range
-                                params_min_q_val, params_max_q_val = get_quantized_range(bits, signed=True)
-                                # find clip threshold
-                                if qat_method == 'lq':  # fix threshold
-                                    clip_max_abs = np.max(np.abs(weight_np))
-                                elif qat_method == 'aciq':  # calculate threshold
-                                    values = weight_np.flatten().copy()
-                                    clip_max_abs = find_clip_aciq(values, bits)
-                    
-                                # quantize weights
-                                w_scale = symmetric_linear_quantization_scale_factor(bits, clip_max_abs)
-                                q_weight_np = linear_quantize_clamp(weight_np, w_scale, params_min_q_val, params_max_q_val, inplace=False)
-                    
-                                # dequantize/rescale
-                                q_weight_np = linear_dequantize(q_weight_np, w_scale)
-                                # print(q_weight_np)
-                    
-                                # update weight
-                                value.data = torch.tensor(q_weight_np).to(self.device)
-                                if 'gru' not in key:
-                                    compressed_size += bits * value.data.numel()
+                            # obtain value range
+                            params_min_q_val, params_max_q_val = get_quantized_range(bits, signed=True)
+                            # find clip threshold
+                            if qat_method == 'lq':  # fix threshold
+                                clip_max_abs = np.max(np.abs(weight_np))
+                            elif qat_method == 'aciq':  # calculate threshold
+                                values = weight_np.flatten().copy()
+                                clip_max_abs = find_clip_aciq(values, bits)
+                
+                            # quantize weights
+                            w_scale = symmetric_linear_quantization_scale_factor(bits, clip_max_abs)
+                            q_weight_np = linear_quantize_clamp(weight_np, w_scale, params_min_q_val, params_max_q_val, inplace=False)
+                
+                            # dequantize/rescale
+                            q_weight_np = linear_dequantize(q_weight_np, w_scale)
+                            # print(q_weight_np)
+                
+                            # update weight
+                            value.data = torch.tensor(q_weight_np).to(self.device)
+                            if 'gru' not in key:
+                                compressed_size += bits * value.data.numel()
                         else:
                 
                             if 'gru' not in key:
                                 print(key)
                                 compressed_size += value.data.element_size() * 8 * value.data.numel()
+                if method == 'ocs':
+                    #implementation form https://github.com/cornell-zhang/dnn-quant-ocs/blob/ca3a413c73850b4e5d7aac558f5856b44060e39c/distiller/quantization/ocs.py
+                    weight_expand_ratio=0.0
+                    weight_clip_threshold=1.0   
+                    split_threshold = 0.0
+
+                    for key, value in model.named_parameters():
+                        if 'gru' not in key:
+                            uncompressed_size += value.data.element_size() * 8 * value.data.numel()
+                        all_w_count += value.data.numel()
+                        #print(key)
+                        quantization_keys = [
+                            'conv',
+                            'multihead',
+                            'linear',
+                            '.pff.',
+                            'stn_fc'
+                        ]
+                        if (any(name in key for name in quantization_keys)):
+                            weight_np = value.data.cpu().detach().numpy()
+                            qat_w_count += value.data.numel()
+
+                            # Perform prelim OCS
+                            q_weight_np, in_channels_to_split = ocs_wts(
+                                    weight_np,
+                                    weight_expand_ratio,
+                                    split_threshold=split_threshold,
+                                    grid_aware=False)
+
+                        # Find the clip threshold (alpha value in clipping papers)
+                        if weight_clip_threshold > 0.0:
+                            # Fixed threshold
+                            max_abs = get_tensor_max_abs(q_weight_np)
+                            clip_max_abs = weight_clip_threshold * max_abs
+                        else:
+                            print('Auto-tuning for weight clip threshold...')
+                            # Calculate threshold
+                            values = weight_np.flatten().copy()
+
+                            # Branch on clip method
+                            if weight_clip_threshold == 0.0:
+                                clip_max_abs = find_clip_mmse(values, bits)
+                            elif self.weight_clip_threshold == -1.0:
+                                clip_max_abs = find_clip_aciq(values, bits)
+                            elif self.weight_clip_threshold == -2.0:
+                                clip_max_abs = find_clip_entropy(values, bits)
+                            else:
+                                raise ValueError('Undefined weight clip method')
+
+                        w_scale = symmetric_linear_quantization_scale_factor(bits, clip_max_abs)
+
+                        # Grid aware OCS
+                        q_weight_np, in_channels_to_split = ocs_wts(
+                                weight_np,
+                                weight_expand_ratio,
+                                split_threshold=split_threshold,
+                                w_scale=w_scale,
+                                grid_aware=True)
+
+                        q_weight_np = linear_quantize_clamp(q_weight_np, w_scale, params_min_q_val, params_max_q_val, inplace=False)
+                
+                        # dequantize/rescale
+                        q_weight_np = linear_dequantize(q_weight_np, w_scale)
+                
+                        # recombine channels
+                        if weight_np.ndim > 1:
+                            recons_weight_np = q_weight_np[:, :weight_np.shape[1]].copy()
+                            for k in range(len(in_channels_to_split)):
+                                recons_weight_np[:, in_channels_to_split[k]:in_channels_to_split[k]+1] += \
+                                    q_weight_np[:, weight_np.shape[1]+k: weight_np.shape[1]+k+1]
+                        else:
+                            recons_weight_np = q_weight_np[:weight_np.shape[0]].copy()
+                            for k in range(len(in_channels_to_split)):
+                                recons_weight_np[in_channels_to_split[k]:in_channels_to_split[k] + 1] += \
+                                    q_weight_np[weight_np.shape[0] + k: weight_np.shape[0] + k + 1]
+                
+                        # print(recons_weight_np.shape)
+                        # update weight
+                        value.data = torch.tensor(recons_weight_np).to(self.device)
+                        compressed_size += bits * value.data.numel()
+                    else:
+                        compressed_size += value.data.element_size() * 8 * value.data.numel()
+
+
                 print("Compressed size:", compressed_size)
                 print("Uncompressed size:", uncompressed_size)
                 
