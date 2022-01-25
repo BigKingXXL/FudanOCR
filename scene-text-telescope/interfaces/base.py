@@ -224,9 +224,16 @@ class TextBase(object):
                         all_w_count += value.data.numel()
                         print(key)
                         quantization_keys = [
-                            'dense',
+                            'block1',
+                            'block2',
+                            'block3',
+                            'block4',
+                            'block5',
+                            'block6',
+                            'block7',
+                            'block8'
                         ]
-                        if value.requires_grad and (any(name in key for name in quantization_keys)):
+                        if value.requires_grad and (any(key in name for name in quantization_keys)):
                             print('compressing ' + key + ' ' + str(value.shape) + ' to ' + str(bits) + 'bits using ' + qat_method)
                             weight_np = value.data.cpu().detach().numpy()
                             qat_w_count += value.data.numel()
