@@ -199,32 +199,30 @@ class TextBase(object):
                     #         del weights[key]
                 model.load_state_dict(weights)
 
-                bits = 8
+                bits = 5
                 uncompressed_size = 0
                 compressed_size = 0
                 all_w_count = 0
                 qat_w_count = 0
                 qat_method = 'aciq'
 
-                print("Compressing to "+str(bits)+" bits using "+str(qat_method))
+                #print("Compressing to "+str(bits)+" bits using "+str(qat_method))
 
                 if (qat_method == 'lq') or (qat_method == 'aciq'):
                     for key, value in model.named_parameters():
-                        uncompressed_size += value.data.element_size() * 8 * value.data.numel()
+                        if 'gru' not in key:
+                            uncompressed_size += value.data.element_size() * 8 * value.data.numel()
                         all_w_count += value.data.numel()
-                        print(key)
+                        #print(key)
                         quantization_keys = [
-                            'block1',
-                            'block2',
-                            'block3',
-                            'block4',
-                            'block5',
-                            'block6',
-                            'block7',
-                            'block8'
+                            'conv',
+                            'multihead',
+                            'linear',
+                            '.pff.',
+                            'stn_fc'
                         ]
-                        if value.requires_grad and (any(key in name for name in quantization_keys)):
-                            print('compressing ' + key + ' ' + str(value.shape) + ' to ' + str(bits) + 'bits using ' + qat_method)
+                        if (any(name in key for name in quantization_keys)):
+                            #print('compressing ' + key + ' ' + str(value.shape) + ' to ' + str(bits) + 'bits using ' + qat_method)
                             weight_np = value.data.cpu().detach().numpy()
                             qat_w_count += value.data.numel()
                             # print(weight_np)
@@ -248,9 +246,15 @@ class TextBase(object):
                     
                                 # update weight
                                 value.data = torch.tensor(q_weight_np).to(self.device)
-                                compressed_size += bits * value.data.numel()
+                                if 'gru' not in key:
+                                    compressed_size += bits * value.data.numel()
                         else:
-                            compressed_size += value.data.element_size() * 8 * value.data.numel()
+                
+                            if 'gru' not in key:
+                                print(key)
+                                compressed_size += value.data.element_size() * 8 * value.data.numel()
+                print("Compressed size:", compressed_size)
+                print("Uncompressed size:", uncompressed_size)
                 
         para_num = get_parameter_number(model)
 
