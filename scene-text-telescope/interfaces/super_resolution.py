@@ -37,6 +37,7 @@ hard_test_times = 0
 SCALE = 2
 KSIZE = 3 * SCALE + 1
 OFFSET_UNIT = SCALE
+USNPATH = '/content/FudanOCR/scene-text-telescope/models/2x/usn.pth'
 class TextSR(base.TextBase):
     def train(self):
         cfg = self.config.TRAIN
@@ -57,7 +58,7 @@ class TextSR(base.TextBase):
         student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
 
         student_model = EDSR(32, 256, scale=SCALE).cuda()
-        student_model.load_state_dict(torch.load(os.path.join(args.model_dir, '{0}x'.format(SCALE), 'usn.pth')))
+        student_model.load_state_dict(torch.load(USNPATH))
         #wandb.watch(student_model)
         #block_loss = torch.nn.MSELoss()
 
@@ -282,7 +283,7 @@ class TextSR(base.TextBase):
         #model_dict = self.generator_init(quantize_static=quantize_static)
         #model, image_crit = model_dict['model'], model_dict['crit']
         model = EDSR(32, 256, scale=SCALE).cuda()
-        model.load_state_dict(torch.load(os.path.join(args.model_dir, '{0}x'.format(SCALE), 'usn.pth')))
+        model.load_state_dict(torch.load(USNPATH))
         items = os.listdir(self.test_data_dir)
 
         if quantize_static:
@@ -344,7 +345,7 @@ class TextSR(base.TextBase):
                 images_lr = images_lr.to(self.device)
                 images_hr = images_hr.to(self.device)
                 sr_beigin = time.time()
-                images_sr, _ = model(images_lr)
+                images_sr = model(images_lr)
 
                 # print('srshape',images_sr.shape)
                 # print('hrshape',images_hr.shape)
