@@ -60,7 +60,10 @@ class EDSR(nn.Module):
 
     def load_state_dict(self, state_dict, strict=True):
         own_state = self.state_dict()
+        #for key, value in self.named_parameters():
+        #  print(key)
         for name, param in state_dict.items():
+            name = name[7:]
             if name in own_state:
                 if isinstance(param, nn.Parameter):
                     param = param.data
@@ -74,5 +77,5 @@ class EDSR(nn.Module):
                                            .format(name, own_state[name].size(), param.size()))
             elif strict:
                 if name.find('tail') == -1:
-                    raise KeyError('unexpected key "{}" in state_dict'
+                    print('unexpected key "{}" in state_dict'
                                    .format(name))
