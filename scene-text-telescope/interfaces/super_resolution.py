@@ -13,6 +13,8 @@ from datetime import datetime
 from utils.util import str_filt
 from torchvision import transforms
 from utils.metrics import get_str_list
+from EDSR.edsr import EDSR
+
 #import wandb
 
 #wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
@@ -23,6 +25,10 @@ times = 0
 easy_test_times = 0
 medium_test_times = 0
 hard_test_times = 0
+
+SCALE = 2
+KSIZE = 3 * SCALE + 1
+OFFSET_UNIT = SCALE
 class TextSR(base.TextBase):
     def train(self):
         cfg = self.config.TRAIN
@@ -38,14 +44,18 @@ class TextSR(base.TextBase):
         val_dataset_list, val_loader_list = self.get_val_data()
         #teacher_model_dict = self.generator_init()
         #teacher_model, teachere_image_crit = teacher_model_dict['model'], teacher_model_dict['crit']
-
+        
         student_model_dict = self.generator_init(quantized=self.args.quantize)
         student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
+
+        student_model = EDSR(32, 256, scale=SCALE).cuda()
+        student_model.load_state_dict(torch.load(os.path.join(args.model_dir, '{0}x'.format(SCALE), 'usn.pth')))
         #wandb.watch(student_model)
         #block_loss = torch.nn.MSELoss()
 
         aster, aster_info = self.CRNN_init()
         student_optimizer_G = self.optimizer_init(student_model)
+        
 
         # if not os.path.exists(cfg.ckpt_dir):
         #     os.makedirs(cfg.ckpt_dir)
@@ -73,7 +83,8 @@ class TextSR(base.TextBase):
                 images_hr = images_hr.to(self.device)
 
                 #teacher_image_prediction, teacher_blocks = teacher_model(images_lr)
-                student_image_prediction, student_blocks = student_model(images_lr)
+                #student_image_prediction, student_blocks = student_model(images_lr)
+                student_image_prediction = student_model(images_lr)
 
                 loss, mse_loss, attention_loss, recognition_loss = student_image_crit(student_image_prediction, images_hr, label_strs)
 
@@ -189,7 +200,8 @@ class TextSR(base.TextBase):
             val_batch_size = images_lr.shape[0]
             images_lr = images_lr.to(self.device)
             images_hr = images_hr.to(self.device)
-            images_sr, _ = model(images_lr)
+            #images_sr, _ = model(images_lr)
+            images_sr = model(images_lr)
 
             if i == len(val_loader) - 1:
                 index = random.randint(0, images_lr.shape[0]-1)
@@ -259,8 +271,10 @@ class TextSR(base.TextBase):
         os.remove('temp.p')
 
     def test(self, quantize_static=False):
-        model_dict = self.generator_init(quantize_static=quantize_static)
-        model, image_crit = model_dict['model'], model_dict['crit']
+        #model_dict = self.generator_init(quantize_static=quantize_static)
+        #model, image_crit = model_dict['model'], model_dict['crit']
+        model = EDSR(32, 256, scale=SCALE).cuda()
+        model.load_state_dict(torch.load(os.path.join(args.model_dir, '{0}x'.format(SCALE), 'usn.pth')))
         items = os.listdir(self.test_data_dir)
 
         if quantize_static:

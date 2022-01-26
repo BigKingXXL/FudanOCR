@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy import stats
-
+import torch
 from interfaces.q_utils import *
 
 #-------------------------------------------------------------------------
