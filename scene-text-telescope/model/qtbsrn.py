@@ -15,8 +15,8 @@ from .tps_spatial_transformer import TPSSpatialTransformer
 from .stn_head import STNHead
 
 QUANTIZATION = WeightDoReFa(bits=8)
-#QConv2d = lambda *x, **kx: BinQConv2d_NoAct(*x, weight_quantization=QUANTIZATION, **kx)
-QConv2d = torch.nn.Conv2d
+QConv2d = lambda *x, **kx: BinQConv2d_NoAct(*x, weight_quantization=QUANTIZATION, **kx)
+#QConv2d = torch.nn.Conv2d
 QLinear = lambda *x, **kx: BinQLinear(*x, weight_quantization=QUANTIZATION, **kx)
 #QLinear = nn.Linear
 

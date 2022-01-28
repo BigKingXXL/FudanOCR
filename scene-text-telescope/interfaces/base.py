@@ -1,3 +1,4 @@
+import codecs
 import os
 import sys
 import torch
@@ -16,9 +17,13 @@ from model import tbsrn, tsrn, edsr, srcnn, srresnet, crnn
 import dataset.dataset as dataset
 from dataset import lmdbDataset, alignCollate_real, lmdbDataset_real, alignCollate_syn, lmdbDataset_mix
 from loss import text_focus_loss
+from model.cdistnet.cdistnet.model.model import CDistNet
+from model.cdistnet.cdistnet.model.translator import Translator
 from model.qtbsrn import QTBSRN
-from utils import ssim_psnr, utils_moran, utils_crnn
+from utils import ssim_psnr, utils_moran, utils_crnn, utils_cdist
 from utils.labelmaps import get_vocabulary
+
+import model.cdistnet.build as cdistnet_build
 
 
 def get_parameter_number(net):
@@ -60,6 +65,7 @@ class TextBase(object):
         alphabet_moran = ':'.join(string.digits+string.ascii_lowercase+'$')
         self.converter_moran = utils_moran.strLabelConverterForAttention(alphabet_moran, ':')
         self.converter_crnn = utils_crnn.strLabelConverter(string.digits + string.ascii_lowercase)
+        self.converter_cdist = utils_cdist.strLabelConverter(['<blank>', '<unk>', '<s>', '</s>', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'])
         if not args.test and not args.demo:
             self.clean_old_ckpt()
         self.logging = logging
@@ -327,6 +333,15 @@ class TextBase(object):
         self.logging.info('loading pretrained crnn model from %s' % model_path)
         model.load_state_dict(torch.load(model_path))
         return model, aster_info
+    
+    def cdistnet_init(self):
+        cfg = self.config.TRAIN
+        model = cdistnet_build.build_cdistnet(cfg.cdistnet)
+        model = model.to(self.device)
+        # model_info = AsterInfo(cfg.voc_type)
+        translator = Translator(cfg.cdistnet, model)
+        return translator, model
+
 
     def parse_crnn_data(self, imgs_input):
         imgs_input = torch.nn.functional.interpolate(imgs_input, (32, 100), mode='bicubic')
@@ -335,6 +350,12 @@ class TextBase(object):
         B = imgs_input[:, 2:3, :, :]
         tensor = 0.299 * R + 0.587 * G + 0.114 * B
         return tensor
+
+    def parse_cdist_data(self, imgs_input):
+        imgs_input = torch.nn.functional.interpolate(imgs_input, (32, 128), mode='bicubic')
+        tensor = imgs_input / 128. - 1.
+        return tensor
+
 
     def Aster_init(self):
         cfg = self.config.TRAIN

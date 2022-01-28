@@ -5,6 +5,37 @@ TRAIN:
     './dataset/mydata/train1',
     './dataset/mydata/train2',
   ]
+  cdistnet:
+    dst_vocab: 'cdistnet/utils/dict_36.txt'   
+    dst_vocab_size: 40
+    rgb2gray: False
+    keep_aspect_ratio: False
+    width: 128 #100
+    height: 32 #32
+    max_width: 180
+    is_lower: True 
+    cnn_num: 2
+    leakyRelu: False
+    hidden_units: 512
+    ff_units: 1024      #ff
+    scale_embedding: True
+    attention_dropout_rate: 0.0
+    residual_dropout_rate: 0.1
+    num_encoder_blocks: 3
+    num_decoder_blocks: 3
+    num_heads: 8
+    beam_size: 10
+    n_best: 1
+    data_aug: True
+    num_fiducial: 20           #number of fiducial points of TPS-STN
+    train_method: 'origin'     #dist:  use distributed train method origin
+    optim: 'origin'
+    # method choice
+    tps_block: 'TPS'      # TPS None
+    feature_block: 'Resnet45'  # Resnet45 Resnet31 MTB
+    test:
+      device: 'cuda'
+
   batch_size: 10
   width: 128
   height: 32

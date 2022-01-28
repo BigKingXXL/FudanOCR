@@ -1,3 +1,4 @@
+from cProfile import label
 import os
 import time
 import copy
@@ -14,6 +15,10 @@ from utils.util import str_filt
 from torchvision import transforms
 from utils.metrics import get_str_list
 import wandb
+from torch.utils.data import DataLoader
+import model.cdistnet.cdistnet.optim.loss as cdist_loss
+import model.cdistnet.cdistnet.data.data as cdist_data
+import re
 
 wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
 
@@ -167,7 +172,7 @@ class TextSR(base.TextBase):
         return predict_result
 
 
-    def eval(self, model, val_loader, image_crit, index, recognizer, aster_info, mode):
+    def eval(self, model, val_loader: DataLoader, image_crit, index, recognizer: torch.nn.Module, aster_info, mode: str):
         global easy_test_times
         global medium_test_times
         global hard_test_times
@@ -303,6 +308,9 @@ class TextSR(base.TextBase):
             elif self.args.rec == 'crnn':
                 crnn, _ = self.CRNN_init()
                 crnn.eval()
+            elif self.args.rec == 'cdist':
+                translator, cdist = self.cdistnet_init()
+                cdist.eval()
             if self.args.arch != 'bicubic':
                 for p in model.parameters():
                     p.requires_grad = False
@@ -338,6 +346,7 @@ class TextSR(base.TextBase):
                     _, preds = preds.max(1)
                     sim_preds = self.converter_moran.decode(preds.data, moran_input[1].data)
                     pred_str_sr = [pred.split('$')[0] for pred in sim_preds]
+
                 elif self.args.rec == 'aster':
                     aster_dict_sr = self.parse_aster_data(images_sr[:, :3, :, :])
                     aster_output_sr = aster(aster_dict_sr["images"])
@@ -348,6 +357,7 @@ class TextSR(base.TextBase):
                     aster_output_lr = aster(aster_dict_lr)
                     pred_rec_lr = aster_output_lr['output']['pred_rec']
                     pred_str_lr, _ = get_str_list(pred_rec_lr, aster_dict_lr['rec_targets'], dataset=aster_info)
+
                 elif self.args.rec == 'crnn':
                     crnn_input = self.parse_crnn_data(images_sr[:, :3, :, :])
                     crnn_output = crnn(crnn_input)
@@ -355,9 +365,36 @@ class TextSR(base.TextBase):
                     preds = preds.transpose(1, 0).contiguous().view(-1)
                     preds_size = torch.IntTensor([crnn_output.size(0)] * val_batch_size)
                     pred_str_sr = self.converter_crnn.decode(preds.data, preds_size.data, raw=False)
-                for pred, target in zip(pred_str_sr, label_strs):
-                    if str_filt(pred, 'lower') == str_filt(target, 'lower'):
-                        n_correct += 1
+
+                elif self.args.rec == 'cdist':
+                    cdist_input = self.parse_cdist_data(images_sr[:, :3, :, :]).to(self.device)
+                    print(cdist_input.size())
+                    #cdist_output, logits = translator.translate_batch(cdist_input)
+                    encoded = self.converter_cdist.encode(label_strs)
+                    padded_y = cdist_data.tgt_pad(encoded).to(self.device)
+                    cdist_output = cdist(cdist_input, padded_y)
+                    padded_y = padded_y[:,1:]
+                    # mask = padded_y.eq(0)
+                    preds = cdist_output.max(1)[1]
+                    preds.eq(padded_y.contiguous().view(-1))
+                    print(self.converter_cdist.decode(padded_y))
+                    length = padded_y.size()[0]
+                    preds=preds.reshape(length, -1) #* mask
+                    print(self.converter_cdist.decode(preds))
+                    n_correct += (preds.eq(padded_y).sum(axis=1) == length).sum().item()
+                    print(n_correct)
+                    # padded_y = padded_y.contiguous().view(-1)
+                    # non_pad_mask = padded_y.ne(0)
+                    # equal_chars = preds.eq(padded_y)
+                    # n_correct += equal_chars.masked_select(non_pad_mask).sum().item()
+                    #preds = torch.tensor(cdist_output).to(self.device)
+                    #preds_size = torch.IntTensor([cdist_output.size(0)] * val_batch_size)
+                    #pred_str_sr = self.converter_cdist.decode(preds.data, preds_size.data, raw=False)
+
+                if self.args.rec != 'cdist':
+                    for pred, target in zip(pred_str_sr, label_strs):
+                        if str_filt(pred, 'lower') == str_filt(target, 'lower'):
+                            n_correct += 1
                 sum_images += val_batch_size
                 torch.cuda.empty_cache()
                 if i % 10 == 0:

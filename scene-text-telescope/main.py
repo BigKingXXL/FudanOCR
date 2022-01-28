@@ -24,7 +24,7 @@ if __name__ == '__main__':
     parser.add_argument('--test_data_dir', type=str, default='./dataset/mydata/test')
     parser.add_argument('--batch_size', type=int, default=None, help='')
     parser.add_argument('--resume', type=str, default='', help='')
-    parser.add_argument('--rec', default='crnn', choices=['crnn'])
+    parser.add_argument('--rec', default='crnn', choices=['crnn', 'cdist'])
     parser.add_argument('--STN', action='store_true', default=False, help='')
     parser.add_argument('--syn', action='store_true', default=False, help='use synthetic LR')
     parser.add_argument('--mixed', action='store_true', default=False, help='mix synthetic with real LR')
