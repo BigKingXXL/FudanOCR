@@ -368,7 +368,7 @@ class TextSR(base.TextBase):
 
                 elif self.args.rec == 'cdist':
                     cdist_input = self.parse_cdist_data(images_sr[:, :3, :, :]).to(self.device)
-                    print(cdist_input.size())
+                    # print(cdist_input.size())
                     #cdist_output, logits = translator.translate_batch(cdist_input)
                     encoded = self.converter_cdist.encode(label_strs)
                     padded_y = cdist_data.tgt_pad(encoded).to(self.device)
@@ -377,12 +377,18 @@ class TextSR(base.TextBase):
                     mask = padded_y.ne(0)
                     preds = cdist_output.max(1)[1]
                     preds.eq(padded_y.contiguous().view(-1))
-                    print(self.converter_cdist.decode(padded_y))
+                    decoded_input = self.converter_cdist.decode(padded_y)
+                    #print(self.converter_cdist.decode(padded_y))
                     length = padded_y.size()[0]
                     preds=preds.reshape(length, -1) * mask
-                    print(self.converter_cdist.decode(preds))
-                    n_correct += (preds.eq(padded_y).sum(axis=1) == length).sum().item()
-                    print(n_correct)
+                    #print(self.converter_cdist.decode(preds))
+                    decoded_output = self.converter_cdist.decode(preds)
+                    for dinput, doutput in zip(decoded_input, decoded_output):
+                        #print(dinput, doutput)
+                        if dinput.split("</s>")[0] == doutput.split("</s>")[0]:
+                            n_correct += 1
+                    #n_correct += (preds.eq(padded_y).sum(axis=1) == length).sum().item()
+                    # print(n_correct)
                     # padded_y = padded_y.contiguous().view(-1)
                     # non_pad_mask = padded_y.ne(0)
                     # equal_chars = preds.eq(padded_y)

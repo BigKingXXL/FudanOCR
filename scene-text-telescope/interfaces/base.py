@@ -354,6 +354,8 @@ class TextBase(object):
         return tensor
 
     def parse_cdist_data(self, imgs_input):
+        if imgs_input.size()[2] == 32 and imgs_input.size()[3] == 128:
+            return imgs_input
         imgs_input = torch.nn.functional.interpolate(imgs_input, (32, 128), mode='bicubic')
         tensor = imgs_input / 128. - 1.
         return src_pad(tensor.cpu().numpy()).type_as(imgs_input)
