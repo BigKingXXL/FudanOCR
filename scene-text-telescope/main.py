@@ -8,7 +8,8 @@ from interfaces.super_resolution import TextSR
 def main(config, args):
     Mission = TextSR(config, args)
     if args.test:
-        Mission.test(quantize_static=args.quantize_static)
+        for bit_size in [8,7,6,5,4,3]:
+            Mission.test(quantize_static=args.quantize_static, modeldir=f"/home/philipp/FudanOCR/scene-text-telescope/checkpoint/stnworkingwtfGradients/epoch{6}_.pth", bitsize=bit_size)
     elif args.demo:
         Mission.demo()
     else:

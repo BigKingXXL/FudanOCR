@@ -210,7 +210,7 @@ class TextBase(object):
                     # if quantized:
                     #     for key in ["module.block2.conv1.bias", "module.block2.conv2.bias", "module.block3.conv1.bias", "module.block3.conv2.bias", "module.block4.conv1.bias", "module.block4.conv2.bias", "module.block5.conv1.bias", "module.block5.conv2.bias", "module.block6.conv1.bias", "module.block6.conv2.bias"]:
                     #         del weights[key]
-                model.load_state_dict(weights)
+                #model.load_state_dict(weights)
 
                 bits = 5
                 uncompressed_size = 0

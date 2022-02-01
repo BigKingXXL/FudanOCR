@@ -22,6 +22,10 @@ import re
 from EDSR.edsr import EDSR
 import os
 import wandb
+from interfaces.aciq import *
+from interfaces.q_utils import *
+from interfaces.ocs import *
+from interfaces.clip import *
 
 wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
 #os.environ['WANDB_MODE'] = 'offline'
@@ -286,11 +290,90 @@ class TextSR(base.TextBase):
         print('Size (MB):', os.path.getsize("temp.p")/1e6)
         os.remove('temp.p')
 
-    def test(self, quantize_static=False):
+    def test(self, quantize_static=False, modeldir='', bitsize=32):
         #model_dict = self.generator_init(quantize_static=quantize_static)
         #model, image_crit = model_dict['model'], model_dict['crit']
-        model = EDSR(32, 256, scale=SCALE).cuda()
-        model.load_state_dict(torch.load(USNPATH))
+        student_model_dict = self.generator_init(quantized=self.args.quantize)
+        stn_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
+
+        del student_model_dict
+        torch.cuda.empty_cache()
+
+        edsr_model = EDSR(32, 256, scale=SCALE).cuda()
+        torch.cuda.empty_cache()
+
+        model = MyEnsemble(stn_model, edsr_model)
+        #old_weights = torch.load(modeldir)
+        #print(old_weights)
+        weights = {}
+        print(modeldir)
+        for k,v in torch.load(modeldir)['state_dict_G'].items():
+            if k.startswith("module.modelA"):
+                print(k)
+                weights[k[14:]] = v
+            else:
+                weights[k] = v
+
+        bits = bitsize
+        uncompressed_size = 0
+        compressed_size = 0
+        all_w_count = 0
+        qat_w_count = 0
+
+        method = 'aciq'
+        model.load_state_dict(weights)
+
+        if method == 'aciq':
+            for key, value in model.named_parameters():
+                if 'gru' not in key:
+                    uncompressed_size += value.data.element_size() * 8 * value.data.numel()
+                all_w_count += value.data.numel()
+                #print(key)
+                quantization_keys = [
+                    'conv',
+                    'multihead',
+                    'linear',
+                    '.pff.',
+                    'stn_fc',
+                    'head',
+                    'body'
+                ]
+                if (any(name in key for name in quantization_keys)):
+                    #print('compressing ' + key + ' ' + str(value.shape) + ' to ' + str(bits) + 'bits using ' + qat_method)
+                    weight_np = value.data.cpu().detach().numpy()
+                    qat_w_count += value.data.numel()
+                    # print(weight_np)
+                    # obtain value range
+                    params_min_q_val, params_max_q_val = get_quantized_range(bits, signed=True)
+                    # find clip threshold
+                    if method == 'lq':  # fix threshold
+                        clip_max_abs = np.max(np.abs(weight_np))
+                    elif method == 'aciq':  # calculate threshold
+                        values = weight_np.flatten().copy()
+                        clip_max_abs = find_clip_aciq(values, bits)
+        
+                    # quantize weights
+                    w_scale = symmetric_linear_quantization_scale_factor(bits, clip_max_abs)
+                    q_weight_np = linear_quantize_clamp(weight_np, w_scale, params_min_q_val, params_max_q_val, inplace=False)
+        
+                    # dequantize/rescale
+                    q_weight_np = linear_dequantize(q_weight_np, w_scale)
+                    # print(q_weight_np)
+        
+                    # update weight
+                    value.data = torch.tensor(q_weight_np).to(self.device)
+                    if 'gru' not in key:
+                        compressed_size += bits * value.data.numel()
+                else:
+        
+                    if 'gru' not in key:
+                        print(key)
+                        compressed_size += value.data.element_size() * 8 * value.data.numel()
+
+        print("Compressed size:", compressed_size)
+        print("Uncompressed size:", uncompressed_size)
+        
+
         items = os.listdir(self.test_data_dir)
 
         if quantize_static:
