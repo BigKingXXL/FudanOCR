@@ -13,9 +13,11 @@ from datetime import datetime
 from utils.util import str_filt
 from torchvision import transforms
 from utils.metrics import get_str_list
+from models.network_swinir import SwinIR
 from EDSR.edsr import EDSR
 import os
 import wandb
+import requests
 
 wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
 #os.environ['WANDB_MODE'] = 'offline'
@@ -30,6 +32,7 @@ SCALE = 2
 KSIZE = 3 * SCALE + 1
 OFFSET_UNIT = SCALE
 USNPATH = '/home/philipp/FudanOCR/scene-text-telescope/2x/usn.pth'
+MODEL_PATH = 'model_zoo/swinir/001_classicalSR_DIV2K_s48w8_SwinIR-M_x2.pth'
 
 class MyEnsemble(torch.nn.Module):
     def __init__(self, modelA, modelB):
@@ -40,7 +43,15 @@ class MyEnsemble(torch.nn.Module):
         
     def forward(self, x):
         #return self.modelB(x)
-        return self.modelB(self.modelA(x))
+        x = self.modelA(x)
+
+        window_size = 8
+        _, _, h_old, w_old = x.size()
+        h_pad = (h_old // window_size + 1) * window_size - h_old
+        w_pad = (w_old // window_size + 1) * window_size - w_old
+        x = torch.cat([x, torch.flip(x, [2])], 2)[:, :, :h_old + h_pad, :]
+        x = torch.cat([x, torch.flip(x, [3])], 3)[:, :, :, :w_old + w_pad]
+        return self.modelB(x)[:,:,8:40,8:136]
         
 class TextSR(base.TextBase):
     def train(self):
@@ -62,11 +73,26 @@ class TextSR(base.TextBase):
         del student_model_dict
         torch.cuda.empty_cache()
 
-        edsr_model = EDSR(32, 256, scale=SCALE).cuda()
-        edsr_model.load_state_dict(torch.load(USNPATH))
+        if os.path.exists(MODEL_PATH):
+            print(f'loading model from {MODEL_PATH}')
+        else:
+            os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+            url = 'https://github.com/JingyunLiang/SwinIR/releases/download/v0.0/{}'.format(os.path.basename(MODEL_PATH))
+            r = requests.get(url, allow_redirects=True)
+            print(f'downloading model {MODEL_PATH}')
+            open(MODEL_PATH, 'wb').write(r.content)
+
+        swin_model = SwinIR(upscale=2, in_chans=3, img_size=48, window_size=8,
+                        img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6],
+                        mlp_ratio=2, upsampler='pixelshuffle', resi_connection='1conv')
+
+        pretrained_model = torch.load(MODEL_PATH)
+        param_key_g = 'params'
+        swin_model.load_state_dict(pretrained_model[param_key_g] if param_key_g in pretrained_model.keys() else pretrained_model, strict=True)
+        swin_model = swin_model.to(self.device)
         torch.cuda.empty_cache()
 
-        student_model = MyEnsemble(stn_model, edsr_model)
+        student_model = MyEnsemble(stn_model, swin_model)
 
         aster, aster_info = self.CRNN_init()
         student_optimizer_G = self.optimizer_init(student_model)
