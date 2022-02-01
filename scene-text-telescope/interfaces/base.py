@@ -338,6 +338,7 @@ class TextBase(object):
         cfg = self.config.TRAIN
         model = cdistnet_build.build_cdistnet(cfg.cdistnet)
         model = model.to(self.device)
+        model.load_state_dict(torch.load("dataset/10_best_acc.pth"))
         # model_info = AsterInfo(cfg.voc_type)
         translator = Translator(cfg.cdistnet, model)
         return translator, model
