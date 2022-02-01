@@ -17,6 +17,7 @@ from model import tbsrn, tsrn, edsr, srcnn, srresnet, crnn
 import dataset.dataset as dataset
 from dataset import lmdbDataset, alignCollate_real, lmdbDataset_real, alignCollate_syn, lmdbDataset_mix
 from loss import text_focus_loss
+from model.cdistnet.cdistnet.data.data import src_pad
 from model.cdistnet.cdistnet.model.model import CDistNet
 from model.cdistnet.cdistnet.model.translator import Translator
 from model.qtbsrn import QTBSRN
@@ -355,7 +356,7 @@ class TextBase(object):
     def parse_cdist_data(self, imgs_input):
         imgs_input = torch.nn.functional.interpolate(imgs_input, (32, 128), mode='bicubic')
         tensor = imgs_input / 128. - 1.
-        return tensor
+        return src_pad(tensor.cpu().numpy()).type_as(imgs_input)
 
 
     def Aster_init(self):
