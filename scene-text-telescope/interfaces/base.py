@@ -147,7 +147,12 @@ class TextBase(object):
             else:
                model = tbsrn.TBSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
                                 STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u, small=small, quantize_static=quantize_static)
-            image_crit = text_focus_loss.TextFocusLoss(self.args)
+            if self.args.rec == "cdist":
+                _, cdist_model = self.cdistnet_init()
+                cdist_model.eval()
+                image_crit = text_focus_loss.TextFocusLoss(self.args, recognition_model=cdist_model)
+            else:
+                image_crit = text_focus_loss.TextFocusLoss(self.args)
         elif self.args.arch == 'tsrn':
             model = tsrn.TSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
                               STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u)
