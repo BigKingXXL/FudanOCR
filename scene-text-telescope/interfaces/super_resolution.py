@@ -374,12 +374,12 @@ class TextSR(base.TextBase):
                     padded_y = cdist_data.tgt_pad(encoded).to(self.device)
                     cdist_output = cdist(cdist_input, padded_y)
                     padded_y = padded_y[:,1:]
-                    # mask = padded_y.eq(0)
+                    mask = padded_y.ne(0)
                     preds = cdist_output.max(1)[1]
                     preds.eq(padded_y.contiguous().view(-1))
                     print(self.converter_cdist.decode(padded_y))
                     length = padded_y.size()[0]
-                    preds=preds.reshape(length, -1) #* mask
+                    preds=preds.reshape(length, -1) * mask
                     print(self.converter_cdist.decode(preds))
                     n_correct += (preds.eq(padded_y).sum(axis=1) == length).sum().item()
                     print(n_correct)
