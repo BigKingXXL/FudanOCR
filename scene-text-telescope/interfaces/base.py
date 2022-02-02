@@ -205,7 +205,8 @@ class TextBase(object):
                     #         del weights[key]
                     #model.load_state_dict(weights)
                 else:
-                    weights = {'module.' + k: v for k, v in torch.load(self.resume)['state_dict_G'].items()}
+                    weights = {'module.' + k: v  for k, v in torch.load(self.resume)['state_dict_G'].items() if ('tps' in k or 'stn' in k)}
+                    #print(weights)
                     # if quantized:
                     #     for key in ["module.block2.conv1.bias", "module.block2.conv2.bias", "module.block3.conv1.bias", "module.block3.conv2.bias", "module.block4.conv1.bias", "module.block4.conv2.bias", "module.block5.conv1.bias", "module.block5.conv2.bias", "module.block6.conv1.bias", "module.block6.conv2.bias"]:
                     #         del weights[key]
@@ -425,12 +426,12 @@ class TextBase(object):
         if not os.path.exists(ckpt_path):
             os.mkdir(ckpt_path)
         save_dict = {
-            'state_dict_G': netG.module.state_dict(),
+            'state_dict_G': netG.state_dict(),
             'info': {'arch': self.args.arch, 'iters': iters, 'epochs': epoch, 'batch_size': self.batch_size,
                      'voc_type': self.voc_type, 'up_scale_factor': self.scale_factor},
             'best_history_res': best_acc_dict,
             'best_model_info': best_model_info,
-            'param_num': sum([param.nelement() for param in netG.module.parameters()]),
+            'param_num': sum([param.nelement() for param in netG.parameters()]),
             'converge': converge_list
         }
         if epoch_save:

@@ -20,13 +20,11 @@ import model.cdistnet.cdistnet.optim.loss as cdist_loss
 import model.cdistnet.cdistnet.data.data as cdist_data
 import re
 from EDSR.edsr import EDSR
+import os
+import wandb
 
-
-#import wandb
-
-
-#wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
-
+wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
+#os.environ['WANDB_MODE'] = 'offline'
 to_pil = transforms.ToPILImage()
 
 times = 0
@@ -37,37 +35,48 @@ hard_test_times = 0
 SCALE = 2
 KSIZE = 3 * SCALE + 1
 OFFSET_UNIT = SCALE
-USNPATH = '/content/FudanOCR/scene-text-telescope/models/2x/usn.pth'
+USNPATH = '/home/philipp/FudanOCR/scene-text-telescope/2x/usn.pth'
+
+class MyEnsemble(torch.nn.Module):
+    def __init__(self, modelA, modelB):
+        super(MyEnsemble, self).__init__()
+        self.modelA = modelA
+        self.modelB = modelB
+
+        
+    def forward(self, x):
+        #return self.modelB(x)
+        return self.modelB(self.modelA(x))
+        
 class TextSR(base.TextBase):
     def train(self):
         cfg = self.config.TRAIN
 
-        # wandb.config.update({
-        #     "lr": cfg.lr,
-        #     "quantization": self.args.quantize,
-        #     "quantization_bits": 8,
-        #     "quantization_method": "DOREFA",
-        #     "batch size": self.args.batch_size
-        # })
+        wandb.config.update({
+            "lr": cfg.lr,
+            "quantization": self.args.quantize,
+            "quantization_bits": 8,
+            "quantization_method": "DOREFA",
+            "batch size": self.args.batch_size
+        })
         train_dataset, train_loader = self.get_train_data()
         val_dataset_list, val_loader_list = self.get_val_data()
-        #teacher_model_dict = self.generator_init()
-        #teacher_model, teachere_image_crit = teacher_model_dict['model'], teacher_model_dict['crit']
         
         student_model_dict = self.generator_init(quantized=self.args.quantize)
-        student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
+        stn_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
 
-        student_model = EDSR(32, 256, scale=SCALE).cuda()
-        student_model.load_state_dict(torch.load(USNPATH))
-        #wandb.watch(student_model)
-        #block_loss = torch.nn.MSELoss()
+        del student_model_dict
+        torch.cuda.empty_cache()
+
+        edsr_model = EDSR(32, 256, scale=SCALE).cuda()
+        edsr_model.load_state_dict(torch.load(USNPATH))
+        torch.cuda.empty_cache()
+
+        student_model = MyEnsemble(stn_model, edsr_model)
 
         aster, aster_info = self.CRNN_init()
         student_optimizer_G = self.optimizer_init(student_model)
         
-
-        # if not os.path.exists(cfg.ckpt_dir):
-        #     os.makedirs(cfg.ckpt_dir)
         best_history_acc = dict(
             zip([val_loader_dir.split('/')[-1] for val_loader_dir in self.config.TRAIN.VAL.val_data_dir],
                 [0] * len(val_loader_list)))
@@ -91,24 +100,20 @@ class TextSR(base.TextBase):
                 images_lr = images_lr.to(self.device)
                 images_hr = images_hr.to(self.device)
 
-                #teacher_image_prediction, teacher_blocks = teacher_model(images_lr)
-                #student_image_prediction, student_blocks = student_model(images_lr)
                 student_image_prediction = student_model(images_lr)
 
                 loss, mse_loss, attention_loss, recognition_loss = student_image_crit(student_image_prediction, images_hr, label_strs)
-
-                #for key in student_blocks.keys():
-                #    loss += block_loss(student_blocks[key], teacher_blocks[key])
-
-                # loss += block_loss(student_image_prediction, teacher_image_prediction)
+                del images_hr
+                del images_lr
+                torch.cuda.empty_cache()
 
                 global times
                 performance = {
                     'epoch': epoch,
                     'loss/loss': loss.item(),
                     'loss/mse_loss': mse_loss.item(),
-                    'loss/position_loss': attention_loss.item(),
-                    'loss/content_loss': recognition_loss.item()
+                    'loss/position_loss': attention_loss,
+                    'loss/content_loss': recognition_loss
                 }
                 pbar.set_postfix(performance)
                 # self.writer.add_scalar('loss/mse_loss', mse_loss , times)
@@ -159,7 +164,7 @@ class TextSR(base.TextBase):
                         self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, True,
                                              converge_list, self.args.exp_name)
 
-                #wandb.log(performance)
+                wandb.log(performance)
                 if iters % cfg.saveInterval == 0:
                     best_model_info = {'accuracy': best_model_acc, 'psnr': best_model_psnr, 'ssim': best_model_ssim}
                     self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, False, converge_list,
@@ -209,8 +214,10 @@ class TextSR(base.TextBase):
             val_batch_size = images_lr.shape[0]
             images_lr = images_lr.to(self.device)
             images_hr = images_hr.to(self.device)
-            #images_sr, _ = model(images_lr)
+
+            torch.cuda.empty_cache()
             images_sr = model(images_lr)
+
 
             if i == len(val_loader) - 1:
                 index = random.randint(0, images_lr.shape[0]-1)
@@ -253,11 +260,11 @@ class TextSR(base.TextBase):
         psnr_avg = round(psnr_avg.item(), 6)
         ssim_avg = round(ssim_avg.item(), 6)
         logging.info('sr_accuray: %.2f%%' % (accuracy * 100))
-        # wandb.log({
-        #     f"val_{mode}_sr_accuracy": accuracy,
-        #     f"val_{mode}_psnr": psnr_avg,
-        #     f"val_{mode}_ssim": ssim_avg
-        # }, commit=False)
+        wandb.log({
+            f"val_{mode}_sr_accuracy": accuracy,
+            f"val_{mode}_psnr": psnr_avg,
+            f"val_{mode}_ssim": ssim_avg
+        }, commit=False)
         metric_dict['accuracy'] = accuracy
         metric_dict['psnr_avg'] = psnr_avg
         metric_dict['ssim_avg'] = ssim_avg
