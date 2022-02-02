@@ -29,6 +29,7 @@ from interfaces.aciq import *
 from interfaces.q_utils import *
 from interfaces.ocs import *
 from interfaces.clip import *
+import model.cdistnet.build as cdistnet_build
 
 
 def get_parameter_number(net):

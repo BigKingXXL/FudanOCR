@@ -26,6 +26,8 @@ from interfaces.aciq import *
 from interfaces.q_utils import *
 from interfaces.ocs import *
 from interfaces.clip import *
+from model.cdistnet.cdistnet.optim.loss import cal_performance
+import torch.optim as optim
 
 wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
 #os.environ['WANDB_MODE'] = 'offline'
@@ -53,6 +55,167 @@ class MyEnsemble(torch.nn.Module):
         return self.modelB(self.modelA(x))
         
 class TextSR(base.TextBase):
+    def train_rec(self):
+        cfg = self.config.TRAIN
+
+        wandb.config.update({
+            "lr": cfg.lr,
+            "quantization": self.args.quantize,
+            "quantization_bits": 8,
+            "quantization_method": "DOREFA",
+            "batch size": self.args.batch_size
+        })
+        train_dataset, train_loader = self.get_train_data()
+        val_dataset_list, val_loader_list = self.get_val_data()
+        _, cdistmodel = self.cdistnet_init()
+        best_history_acc = dict(
+            zip([val_loader_dir.split('/')[-1] for val_loader_dir in self.config.TRAIN.VAL.val_data_dir],
+                [0] * len(val_loader_list)))
+        student_optimizer_G = self.optimizer_init(cdistmodel)
+        converge_list = []
+        best_acc = 0
+        for epoch in range(cfg.epochs):
+            pbar = tqdm(total=len(train_loader))
+            for j, data in enumerate(train_loader):
+                pbar.update()
+                # teacher_model.eval()
+                cdistmodel.train()
+                for p in cdistmodel.parameters():
+                    p.requires_grad = True
+                iters = len(train_loader) * epoch + j
+
+                images_hr, _, label_strs = data
+                images_hr = images_hr.to(self.device)
+
+                label_smoothing = True
+                cdist_input = self.parse_cdist_data(images_hr[:, :3, :, :]).to(self.device)
+                encoded = self.converter_cdist.encode(label_strs)
+                padded_y = cdist_data.tgt_pad(encoded).to(self.device)
+                tgt = padded_y[:, 1:]
+                sr_pred = cdistmodel(cdist_input, padded_y)
+                loss, n_correct = cal_performance(sr_pred, tgt, smoothing=label_smoothing,local_rank=self.device)
+
+                global times
+                performance = {
+                    'epoch': epoch,
+                    'loss/loss': loss.item(),
+                    'train/accuracy': n_correct/images_hr.shape[0]
+                }
+                pbar.set_postfix(performance)
+                times += 1
+
+                loss_im = loss * 100
+
+                student_optimizer_G.zero_grad()
+                loss_im.backward()
+                torch.nn.utils.clip_grad_norm_(cdistmodel.parameters(), 0.25)
+                student_optimizer_G.step()
+
+                if iters % cfg.VAL.valInterval == 0:
+                    current_acc_dict = {}
+                    for k, val_loader in (enumerate(val_loader_list)):
+                        data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
+                        #vpbar.set_description_str(data_name)
+                        logging.info(f'evaluating {data_name}')
+                        metrics_dict = self.eval_rec(cdistmodel, val_loader, iters, data_name)
+                        converge_list.append({'iterator': iters, 'acc': metrics_dict['accuracy']})
+                        acc = metrics_dict['accuracy']
+                        current_acc_dict[data_name] = float(acc)
+                        if acc > best_history_acc[data_name]:
+
+                            data_for_evaluation = metrics_dict['images_and_labels']
+
+                            best_history_acc[data_name] = float(acc)
+                            best_history_acc['epoch'] = epoch
+                            #pbar.set_postfix({data_name: best_history_acc[data_name]})
+                            logging.info('best_%s = %.2f%%*' % (data_name, best_history_acc[data_name] * 100))
+
+                        else:
+                            #pbar.set_postfix({data_name: best_history_acc[data_name]})
+                            logging.info('best_%s = %.2f%%' % (data_name, best_history_acc[data_name] * 100))
+                    if sum(current_acc_dict.values()) > best_acc:
+                        best_acc = sum(current_acc_dict.values())
+                        best_model_acc = current_acc_dict
+                        best_model_acc['epoch'] = epoch
+                        best_model_info = {'accuracy': best_model_acc}
+                        logging.info('saving best model')
+                        self.save_checkpoint(cdistmodel, epoch, iters, best_history_acc, best_model_info, True,
+                                             converge_list, self.args.exp_name)
+
+                wandb.log(performance)
+                if iters % cfg.saveInterval == 0:
+                    best_model_info = {'accuracy': best_model_acc}
+                    self.save_checkpoint(cdistmodel, epoch, iters, best_history_acc, best_model_info, False, converge_list,
+                                         self.args.exp_name)
+            self.save_checkpoint(cdistmodel, epoch, iters, best_history_acc, best_model_info, True,
+                                             converge_list, self.args.exp_name, True)
+            pbar.close()
+
+    def eval_rec(self, model, val_loader: DataLoader, index, mode: str):
+        global easy_test_times
+        global medium_test_times
+        global hard_test_times
+
+        for p in model.parameters():
+            p.requires_grad = False
+
+        model.eval()
+        n_correct = 0
+
+        sum_images = 0
+        metric_dict = {'accuracy': 0.0, 'psnr_avg': 0.0, 'ssim_avg': 0.0,
+                       'images_and_labels': []}
+        image_start_index = 0
+        for i, data in (enumerate(val_loader)):
+            images_hr, _, label_strs = data
+            val_batch_size = images_hr.shape[0]
+
+            images_hr = images_hr.to(self.device)
+
+            cdist_input = self.parse_cdist_data(images_hr[:, :3, :, :]).to(self.device)
+            # print(cdist_input.size())
+            #cdist_output, logits = translator.translate_batch(cdist_input)
+            encoded = self.converter_cdist.encode(label_strs)
+            padded_y = cdist_data.tgt_pad(encoded).to(self.device)
+            cdist_output = model(cdist_input, padded_y)
+            padded_y = padded_y[:,1:]
+            mask = padded_y.ne(0)
+            preds = cdist_output.max(1)[1]
+            preds.eq(padded_y.contiguous().view(-1))
+            decoded_input = self.converter_cdist.decode(padded_y)
+            #print(self.converter_cdist.decode(padded_y))
+            length = padded_y.size()[0]
+            preds=preds.reshape(length, -1) * mask
+            #print(self.converter_cdist.decode(preds))
+            decoded_output = self.converter_cdist.decode(preds)
+            for dinput, doutput in zip(decoded_input, decoded_output):
+                #print(dinput, doutput)
+                if dinput.split("</s>")[0] == doutput.split("</s>")[0]:
+                    n_correct += 1
+
+            sum_images += val_batch_size
+            torch.cuda.empty_cache()
+
+        
+        accuracy = round(n_correct / sum_images, 4)
+        logging.info('sr_accuray: %.2f%%' % (accuracy * 100))
+        wandb.log({
+            f"val_{mode}_sr_accuracy": accuracy
+        }, commit=True)
+        metric_dict['accuracy'] = accuracy
+
+        if mode == 'easy':
+            self.writer.add_scalar('{}_accuracy'.format(mode), accuracy, easy_test_times)
+            easy_test_times += 1
+        if mode == 'medium':
+            self.writer.add_scalar('{}_accuracy'.format(mode), accuracy, medium_test_times)
+            medium_test_times += 1
+        if mode == 'hard':
+            self.writer.add_scalar('{}_accuracy'.format(mode), accuracy, hard_test_times)
+            hard_test_times += 1
+
+        return metric_dict
+
     def train(self):
         cfg = self.config.TRAIN
 
@@ -78,8 +241,21 @@ class TextSR(base.TextBase):
 
         student_model = MyEnsemble(stn_model, edsr_model)
 
-        aster, aster_info = self.CRNN_init()
+        if self.args.rec == 'moran':
+            aster = self.MORAN_init()
+            aster.eval()
+        elif self.args.rec == 'aster':
+            aster, aster_info = self.Aster_init()
+            aster.eval()
+        elif self.args.rec == 'crnn':
+            aster, _ = self.CRNN_init()
+            aster.eval()
+        elif self.args.rec == 'cdist':
+            translator, aster = self.cdistnet_init()
+            aster.eval()
+
         student_optimizer_G = self.optimizer_init(student_model)
+        cdistoptimizer = optim.Adam(student_image_crit.recognition_model.parameters(), lr=0.01, betas=(cfg.beta1, 0.999))
         
         best_history_acc = dict(
             zip([val_loader_dir.split('/')[-1] for val_loader_dir in self.config.TRAIN.VAL.val_data_dir],
@@ -95,8 +271,14 @@ class TextSR(base.TextBase):
             for j, data in enumerate(train_loader):
                 pbar.update()
                 # teacher_model.eval()
+                # aster.train()
+                # for p in aster.parameters():
+                #     p.requires_grad = True
                 student_model.train()
+                student_image_crit.recognition_model.train()
                 for p in student_model.parameters():
+                    p.requires_grad = True
+                for p in student_image_crit.recognition_model.parameters():
                     p.requires_grad = True
                 iters = len(train_loader) * epoch + j
 
@@ -120,17 +302,17 @@ class TextSR(base.TextBase):
                     'loss/content_loss': recognition_loss
                 }
                 pbar.set_postfix(performance)
-                # self.writer.add_scalar('loss/mse_loss', mse_loss , times)
-                # self.writer.add_scalar('loss/position_loss', attention_loss, times)
-                # self.writer.add_scalar('loss/content_loss', recognition_loss, times)
                 times += 1
 
                 loss_im = loss * 100
 
                 student_optimizer_G.zero_grad()
+                cdistoptimizer.zero_grad()
                 loss_im.backward()
                 torch.nn.utils.clip_grad_norm_(student_model.parameters(), 0.25)
+                torch.nn.utils.clip_grad_norm_(student_image_crit.recognition_model.parameters(), 0.25)
                 student_optimizer_G.step()
+                cdistoptimizer.step()
 
                 if iters % cfg.VAL.valInterval == 0:
                     current_acc_dict = {}
@@ -138,7 +320,7 @@ class TextSR(base.TextBase):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
                         #vpbar.set_description_str(data_name)
                         logging.info(f'evaluating {data_name}')
-                        metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, aster_info, data_name)
+                        metrics_dict = self.eval(student_model, val_loader, student_image_crit, iters, aster, data_name)
                         converge_list.append({'iterator': iters,
                                               'acc': metrics_dict['accuracy'],
                                               'psnr': metrics_dict['psnr_avg'],
@@ -196,7 +378,7 @@ class TextSR(base.TextBase):
         return predict_result
 
 
-    def eval(self, model, val_loader: DataLoader, image_crit, index, recognizer: torch.nn.Module, aster_info, mode: str):
+    def eval(self, model, val_loader: DataLoader, image_crit, index, recognizer: torch.nn.Module, mode: str):
         global easy_test_times
         global medium_test_times
         global hard_test_times
@@ -232,21 +414,41 @@ class TextSR(base.TextBase):
             metric_dict['psnr'].append(self.cal_psnr(images_sr, images_hr))
             metric_dict['ssim'].append(self.cal_ssim(images_sr, images_hr))
 
-            recognizer_dict_sr = self.parse_crnn_data(images_sr[:, :3, :, :])
-            recognizer_output_sr = recognizer(recognizer_dict_sr)
-            outputs_sr = recognizer_output_sr.permute(1, 0, 2).contiguous()
-            predict_result_sr = self.get_crnn_pred(outputs_sr)
-            metric_dict['images_and_labels'].append(
-                (images_hr.detach().cpu(), images_sr.detach().cpu(), label_strs, predict_result_sr))
+            if self.args.rec == 'crnn':
+                crnn_input = self.parse_crnn_data(images_sr[:, :3, :, :])
+                crnn_output = recognizer(crnn_input)
+                outputs_sr = crnn_output.permute(1, 0, 2).contiguous()
+                predict_result_sr = self.get_crnn_pred(outputs_sr)
+                metric_dict['images_and_labels'].append(
+                    (images_hr.detach().cpu(), images_sr.detach().cpu(), label_strs, predict_result_sr))
 
-            cnt = 0
-            for pred, target in zip(predict_result_sr, label_strs):
-                # self.logging.info('{} | {} | {} | {}\n'.format(write_line, pred, str_filt(target, 'lower'),
-                #                                      pred == str_filt(target, 'lower')))
-                # write_line += 1
-                if pred == str_filt(target, 'lower'):
-                    n_correct += 1
-                cnt += 1
+                cnt = 0
+                for pred, target in zip(predict_result_sr, label_strs):
+                    if pred == str_filt(target, 'lower'):
+                        n_correct += 1
+                    cnt += 1
+            elif self.args.rec == 'cdist':
+                cdist_input = self.parse_cdist_data(images_sr[:, :3, :, :]).to(self.device)
+                # print(cdist_input.size())
+                #cdist_output, logits = translator.translate_batch(cdist_input)
+                encoded = self.converter_cdist.encode(label_strs)
+                padded_y = cdist_data.tgt_pad(encoded).to(self.device)
+                cdist_output = recognizer(cdist_input, padded_y)
+                padded_y = padded_y[:,1:]
+                mask = padded_y.ne(0)
+                preds = cdist_output.max(1)[1]
+                preds.eq(padded_y.contiguous().view(-1))
+                decoded_input = self.converter_cdist.decode(padded_y)
+                #print(self.converter_cdist.decode(padded_y))
+                length = padded_y.size()[0]
+                preds=preds.reshape(length, -1) * mask
+                #print(self.converter_cdist.decode(preds))
+                decoded_output = self.converter_cdist.decode(preds)
+                for dinput, doutput in zip(decoded_input, decoded_output):
+                    #print(dinput, doutput)
+                    if dinput.split("</s>")[0] == doutput.split("</s>")[0]:
+                        n_correct += 1
+
 
             sum_images += val_batch_size
             torch.cuda.empty_cache()
@@ -320,7 +522,7 @@ class TextSR(base.TextBase):
         all_w_count = 0
         qat_w_count = 0
 
-        method = 'aciq'
+        method = 'none'
         model.load_state_dict(weights)
 
         if method == 'aciq':

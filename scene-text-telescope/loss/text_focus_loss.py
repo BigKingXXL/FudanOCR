@@ -107,24 +107,27 @@ class TextFocusLoss(nn.Module):
                                                                           input_tensor, test=False)
             sr_pred, word_attention_map_pred, sr_correct_list = self.transformer(to_gray_tensor(sr_img), length_tensor,
                                                                             input_tensor, test=False)
-            
+            recognition_loss = 0
+            recognition_loss += weight_cross_entropy(sr_pred, text_gt)
             if self.recognition_model is None:
-                recognition_loss = weight_cross_entropy(sr_pred, text_gt)
+                recognition_loss += weight_cross_entropy(sr_pred, text_gt)
 
             else:
-                label_smoothing = True
+                label_smoothing = False
                 device="cuda"
                 cdist_input = self.parse_cdist_data(sr_img[:, :3, :, :]).to(self.device)
                 encoded = self.converter_cdist.encode(label)
                 padded_y = cdist_data.tgt_pad(encoded).to(self.device)
                 tgt = padded_y[:, 1:]
                 sr_pred = self.recognition_model(cdist_input, padded_y)
-                recognition_loss, n_correct = cal_performance(sr_pred, tgt, smoothing=label_smoothing,local_rank=device)
+                cdist_losss, n_correct = cal_performance(sr_pred, tgt, smoothing=label_smoothing,local_rank=device)
+                recognition_loss += cdist_losss
                                                  
             attention_loss = self.l1_loss(word_attention_map_gt, word_attention_map_pred)
             # recognition_loss = self.l1_loss(hr_pred, sr_pred)
             #recognition_loss = weight_cross_entropy(sr_pred, text_gt)
-            loss = mse_loss + attention_loss * 10 + recognition_loss * 0.005
+            loss = mse_loss + attention_loss * 10 + recognition_loss * 0.0005
+            #loss = mse_loss + recognition_loss * 0.0005
             return loss, mse_loss, attention_loss, recognition_loss
         else:
             attention_loss = -1

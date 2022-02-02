@@ -8,10 +8,12 @@ from interfaces.super_resolution import TextSR
 def main(config, args):
     Mission = TextSR(config, args)
     if args.test:
-        for bit_size in [8,7,6,5,4,3]:
-            Mission.test(quantize_static=args.quantize_static, modeldir=f"/home/philipp/FudanOCR/scene-text-telescope/checkpoint/stnworkingwtfGradients/epoch{6}_.pth", bitsize=bit_size)
+        for epoch in range(3):
+            Mission.test(quantize_static=args.quantize_static, modeldir=f"/home/philipp/FudanOCR/scene-text-telescope/checkpoint/CARcdist/epoch{epoch}_.pth", bitsize=8)
     elif args.demo:
         Mission.demo()
+    elif args.train_cdist:
+        Mission.train_rec()
     else:
         Mission.train()
 
@@ -36,6 +38,7 @@ if __name__ == '__main__':
     parser.add_argument('--demo_dir', type=str, default='./demo')
     parser.add_argument('--quantize', action='store_true')
     parser.add_argument('--quantize_static', action='store_true')
+    parser.add_argument('--train_cdist', action='store_true')
     args = parser.parse_args()
     config_path = os.path.join('config', 'super_resolution.yaml')
     config = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)
