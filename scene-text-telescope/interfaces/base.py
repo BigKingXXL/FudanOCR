@@ -218,7 +218,7 @@ class TextBase(object):
                 qat_w_count = 0
                 qat_method = 'aciq'
 
-                method = 'ocs'
+                method = 'none'
 
                 if method == 'aciq':
                     for key, value in model.named_parameters():
