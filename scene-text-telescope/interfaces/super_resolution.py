@@ -14,13 +14,17 @@ from datetime import datetime
 from utils.util import str_filt
 from torchvision import transforms
 from utils.metrics import get_str_list
+<<<<<<< HEAD
 import wandb
 from torch.utils.data import DataLoader
 import model.cdistnet.cdistnet.optim.loss as cdist_loss
 import model.cdistnet.cdistnet.data.data as cdist_data
 import re
+=======
+#import wandb
+>>>>>>> dbd38e2 (disabled wandb)
 
-wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
+#wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
 
 to_pil = transforms.ToPILImage()
 
@@ -32,13 +36,13 @@ class TextSR(base.TextBase):
     def train(self):
         cfg = self.config.TRAIN
 
-        wandb.config.update({
-            "lr": cfg.lr,
-            "quantization": self.args.quantize,
-            "quantization_bits": 8,
-            "quantization_method": "DOREFA",
-            "batch size": self.args.batch_size
-        })
+        # wandb.config.update({
+        #     "lr": cfg.lr,
+        #     "quantization": self.args.quantize,
+        #     "quantization_bits": 8,
+        #     "quantization_method": "DOREFA",
+        #     "batch size": self.args.batch_size
+        # })
         train_dataset, train_loader = self.get_train_data()
         val_dataset_list, val_loader_list = self.get_val_data()
         #teacher_model_dict = self.generator_init()
@@ -46,7 +50,7 @@ class TextSR(base.TextBase):
 
         student_model_dict = self.generator_init(quantized=self.args.quantize)
         student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
-        wandb.watch(student_model)
+        #wandb.watch(student_model)
         #block_loss = torch.nn.MSELoss()
 
         aster, aster_info = self.CRNN_init()
@@ -144,7 +148,7 @@ class TextSR(base.TextBase):
                         self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, True,
                                              converge_list, self.args.exp_name)
 
-                wandb.log(performance)
+                #wandb.log(performance)
                 if iters % cfg.saveInterval == 0:
                     best_model_info = {'accuracy': best_model_acc, 'psnr': best_model_psnr, 'ssim': best_model_ssim}
                     self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, False, converge_list,
@@ -237,11 +241,11 @@ class TextSR(base.TextBase):
         psnr_avg = round(psnr_avg.item(), 6)
         ssim_avg = round(ssim_avg.item(), 6)
         logging.info('sr_accuray: %.2f%%' % (accuracy * 100))
-        wandb.log({
-            f"val_{mode}_sr_accuracy": accuracy,
-            f"val_{mode}_psnr": psnr_avg,
-            f"val_{mode}_ssim": ssim_avg
-        }, commit=False)
+        # wandb.log({
+        #     f"val_{mode}_sr_accuracy": accuracy,
+        #     f"val_{mode}_psnr": psnr_avg,
+        #     f"val_{mode}_ssim": ssim_avg
+        # }, commit=False)
         metric_dict['accuracy'] = accuracy
         metric_dict['psnr_avg'] = psnr_avg
         metric_dict['ssim_avg'] = ssim_avg
