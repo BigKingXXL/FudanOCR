@@ -1,6 +1,6 @@
 import numpy as np
 
-from q_utils import *
+from interfaces.q_utils import *
 
 #-------------------------------------------------------------------------
 # Distiller quantization function

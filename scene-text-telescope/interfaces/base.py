@@ -25,9 +25,8 @@ from model.qtbsrn import QTBSRN
 from utils import ssim_psnr, utils_moran, utils_crnn, utils_cdist
 from utils.labelmaps import get_vocabulary
 
-import model.cdistnet.build as cdistnet_build
-from aciq import *
-from q_utils import *
+from interfaces.aciq import *
+from interfaces.q_utils import *
 
 
 def get_parameter_number(net):
