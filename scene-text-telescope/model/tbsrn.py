@@ -197,7 +197,7 @@ class PositionwiseFeedForward(nn.Module):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
 class TBSRN(nn.Module):
-    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3, small=False, quantize_static=False):
+    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=8, mask=False, hidden_units=32, input_channel=3, small=False, quantize_static=False):
         super(TBSRN, self).__init__()
 
         self.quantize = quantize_static
@@ -221,7 +221,7 @@ class TBSRN(nn.Module):
         self.srb_nums = srb_nums
         if not small:
             for i in range(srb_nums):
-                setattr(self, 'block%d' % (i + 2), RecurrentResidualBlock(2 * hidden_units))
+                setattr(self, 'block%d' % (i + 2), Block(2 * hidden_units))
         else:
             for i in range(srb_nums):
                 setattr(self, 'block%d' % (i + 2), RecurrentResidualBlockSmall(2 * hidden_units))
@@ -254,6 +254,11 @@ class TBSRN(nn.Module):
 
     def forward(self, x):
         # print("Size in beginning of forward: ", x.size())
+<<<<<<< HEAD
+=======
+        # resnext = self.resnext_block(x)
+        # print("Size after block", resnext.size())
+>>>>>>> b99348a (use convnext instead of recurrent res block)
         if self.quantize:
             x = self.quant(x)
         if self.stn and self.training:
@@ -261,6 +266,10 @@ class TBSRN(nn.Module):
             _, ctrl_points_x = self.stn_head(x)
             x, _ = self.tps(x, ctrl_points_x)
         # print("Size after stn: ", x.size())
+<<<<<<< HEAD
+=======
+        
+>>>>>>> b99348a (use convnext instead of recurrent res block)
 
         #apply first block
         block = {'1': self.block1(x)}
