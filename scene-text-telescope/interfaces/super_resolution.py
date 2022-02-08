@@ -42,6 +42,7 @@ SCALE = 2
 KSIZE = 3 * SCALE + 1
 OFFSET_UNIT = SCALE
 USNPATH = '/home/philipp/FudanOCR/scene-text-telescope/2x/usn.pth'
+MODELDIR = '/home/philipp/FudanOCR/scene-text-telescope/checkpoint/stnworkingwtfGradients/epoch5_.pth'
 
 class MyEnsemble(torch.nn.Module):
     def __init__(self, modelA, modelB):
@@ -67,6 +68,12 @@ class TextSR(base.TextBase):
         })
         train_dataset, train_loader = self.get_train_data()
         val_dataset_list, val_loader_list = self.get_val_data()
+
+
+        student_model_dict = self.generator_init(quantized=self.args.quantize)
+        SRmodel, _ = student_model_dict['model'], student_model_dict['crit']
+        SRmodel.eval()
+
         _, cdistmodel = self.cdistnet_init()
         best_history_acc = dict(
             zip([val_loader_dir.split('/')[-1] for val_loader_dir in self.config.TRAIN.VAL.val_data_dir],
@@ -84,8 +91,8 @@ class TextSR(base.TextBase):
                     p.requires_grad = True
                 iters = len(train_loader) * epoch + j
 
-                images_hr, _, label_strs = data
-                images_hr = images_hr.to(self.device)
+                _, images_lr, label_strs = data
+                images_hr = SRmodel(images_lr.to(self.device))
 
                 label_smoothing = True
                 cdist_input = self.parse_cdist_data(images_hr[:, :3, :, :]).to(self.device)
@@ -104,7 +111,7 @@ class TextSR(base.TextBase):
                 pbar.set_postfix(performance)
                 times += 1
 
-                loss_im = loss * 100
+                loss_im = loss
 
                 student_optimizer_G.zero_grad()
                 loss_im.backward()
@@ -117,7 +124,7 @@ class TextSR(base.TextBase):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
                         #vpbar.set_description_str(data_name)
                         logging.info(f'evaluating {data_name}')
-                        metrics_dict = self.eval_rec(cdistmodel, val_loader, iters, data_name)
+                        metrics_dict = self.eval_rec(cdistmodel, SRmodel, val_loader, iters, data_name)
                         converge_list.append({'iterator': iters, 'acc': metrics_dict['accuracy']})
                         acc = metrics_dict['accuracy']
                         current_acc_dict[data_name] = float(acc)
@@ -151,7 +158,7 @@ class TextSR(base.TextBase):
                                              converge_list, self.args.exp_name, True)
             pbar.close()
 
-    def eval_rec(self, model, val_loader: DataLoader, index, mode: str):
+    def eval_rec(self, model, SRmodel, val_loader: DataLoader, index, mode: str):
         global easy_test_times
         global medium_test_times
         global hard_test_times
@@ -167,10 +174,10 @@ class TextSR(base.TextBase):
                        'images_and_labels': []}
         image_start_index = 0
         for i, data in (enumerate(val_loader)):
-            images_hr, _, label_strs = data
-            val_batch_size = images_hr.shape[0]
+            _, images_lr, label_strs = data
+            val_batch_size = images_lr.shape[0]
 
-            images_hr = images_hr.to(self.device)
+            images_hr = SRmodel(images_lr.to(self.device))
 
             cdist_input = self.parse_cdist_data(images_hr[:, :3, :, :]).to(self.device)
             # print(cdist_input.size())
@@ -230,16 +237,8 @@ class TextSR(base.TextBase):
         val_dataset_list, val_loader_list = self.get_val_data()
         
         student_model_dict = self.generator_init(quantized=self.args.quantize)
-        stn_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
+        student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
 
-        del student_model_dict
-        torch.cuda.empty_cache()
-
-        edsr_model = EDSR(32, 256, scale=SCALE).cuda()
-        edsr_model.load_state_dict(torch.load(USNPATH))
-        torch.cuda.empty_cache()
-
-        student_model = MyEnsemble(stn_model, edsr_model)
 
         if self.args.rec == 'moran':
             aster = self.MORAN_init()
@@ -274,10 +273,11 @@ class TextSR(base.TextBase):
                 # aster.train()
                 # for p in aster.parameters():
                 #     p.requires_grad = True
-                student_model.train()
+                #student_model.train()
+                student_model.eval()
                 student_image_crit.recognition_model.train()
-                for p in student_model.parameters():
-                    p.requires_grad = True
+                # for p in student_model.parameters():
+                #     p.requires_grad = True
                 for p in student_image_crit.recognition_model.parameters():
                     p.requires_grad = True
                 iters = len(train_loader) * epoch + j
@@ -306,12 +306,12 @@ class TextSR(base.TextBase):
 
                 loss_im = loss * 100
 
-                student_optimizer_G.zero_grad()
+                #student_optimizer_G.zero_grad()
                 cdistoptimizer.zero_grad()
                 loss_im.backward()
                 torch.nn.utils.clip_grad_norm_(student_model.parameters(), 0.25)
                 torch.nn.utils.clip_grad_norm_(student_image_crit.recognition_model.parameters(), 0.25)
-                student_optimizer_G.step()
+                #student_optimizer_G.step()
                 cdistoptimizer.step()
 
                 if iters % cfg.VAL.valInterval == 0:
@@ -347,6 +347,7 @@ class TextSR(base.TextBase):
                         best_model_ssim[data_name] = metrics_dict['ssim_avg']
                         best_model_info = {'accuracy': best_model_acc, 'psnr': best_model_psnr, 'ssim': best_model_ssim}
                         logging.info('saving best model')
+                        torch.save(aster.state_dict(), os.path.join(os.path.join('checkpoint', self.args.exp_name), f'epoch{epoch}_cdist.pth'))
                         self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, True,
                                              converge_list, self.args.exp_name)
 
@@ -355,6 +356,8 @@ class TextSR(base.TextBase):
                     best_model_info = {'accuracy': best_model_acc, 'psnr': best_model_psnr, 'ssim': best_model_ssim}
                     self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, False, converge_list,
                                          self.args.exp_name)
+                    torch.save(aster.state_dict(), os.path.join(os.path.join('checkpoint', self.args.exp_name), f'best_cdist.pth'))
+
             self.save_checkpoint(student_model, epoch, iters, best_history_acc, best_model_info, True,
                                              converge_list, self.args.exp_name, True)
             pbar.close()
@@ -492,29 +495,11 @@ class TextSR(base.TextBase):
         print('Size (MB):', os.path.getsize("temp.p")/1e6)
         os.remove('temp.p')
 
-    def test(self, quantize_static=False, modeldir='', bitsize=32):
+    def test(self, quantize_static=False, cdistdir='', bitsize=32):
         #model_dict = self.generator_init(quantize_static=quantize_static)
         #model, image_crit = model_dict['model'], model_dict['crit']
         student_model_dict = self.generator_init(quantized=self.args.quantize)
-        stn_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
-
-        del student_model_dict
-        torch.cuda.empty_cache()
-
-        edsr_model = EDSR(32, 256, scale=SCALE).cuda()
-        torch.cuda.empty_cache()
-
-        model = MyEnsemble(stn_model, edsr_model)
-        #old_weights = torch.load(modeldir)
-        #print(old_weights)
-        weights = {}
-        print(modeldir)
-        for k,v in torch.load(modeldir)['state_dict_G'].items():
-            if k.startswith("module.modelA"):
-                print(k)
-                weights[k[14:]] = v
-            else:
-                weights[k] = v
+        model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
 
         bits = bitsize
         uncompressed_size = 0
@@ -523,7 +508,6 @@ class TextSR(base.TextBase):
         qat_w_count = 0
 
         method = 'none'
-        model.load_state_dict(weights)
 
         if method == 'aciq':
             for key, value in model.named_parameters():
@@ -619,7 +603,8 @@ class TextSR(base.TextBase):
                 crnn, _ = self.CRNN_init()
                 crnn.eval()
             elif self.args.rec == 'cdist':
-                translator, cdist = self.cdistnet_init()
+                print("Loading cdist from "+cdistdir)
+                translator, cdist = self.cdistnet_init(cdistdir)
                 cdist.eval()
             if self.args.arch != 'bicubic':
                 for p in model.parameters():

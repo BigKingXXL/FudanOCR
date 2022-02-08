@@ -196,13 +196,48 @@ class PositionwiseFeedForward(nn.Module):
     def forward(self, x):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
+class STNmodel(nn.Module):
+    def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3, small=False, quantize_static=False):
+        super(STNmodel, self).__init__()
+
+        in_planes = 3
+        if mask:
+            in_planes = 4
+        assert math.log(scale_factor, 2) % 1 == 0
+
+
+        tps_outputsize = [height // scale_factor, width // scale_factor]
+        num_control_points = 20
+        tps_margins = [0.05, 0.05]
+        self.stn = STN
+        if self.stn:
+            self.tps = TPSSpatialTransformer(
+                output_image_size=tuple(tps_outputsize),
+                num_control_points=num_control_points,
+                margins=tuple(tps_margins))
+
+            self.stn_head = STNHead(
+                in_planes=in_planes,
+                num_ctrlpoints=num_control_points,
+                activation='none')
+
+    def forward(self, x):
+        if self.stn and self.training:
+            _, ctrl_points_x = self.stn_head(x)
+            x, _ = self.tps(x, ctrl_points_x)
+        return x
+
 class TBSRN(nn.Module):
     def __init__(self, scale_factor=2, width=128, height=32, STN=True, srb_nums=5, mask=False, hidden_units=32, input_channel=3, small=False, quantize_static=False):
         super(TBSRN, self).__init__()
 
         self.quantize = quantize_static
-        # self.conv = nn.Conv2d(input_channel, 3,3,1,1)
-        # self.bn = nn.BatchNorm2d(3)
+
+
+        self.conv = nn.Conv2d(input_channel, 3,3,1,1)
+        self.bn = nn.BatchNorm2d(3)
+
+
         self.relu = nn.ReLU()
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
@@ -213,30 +248,34 @@ class TBSRN(nn.Module):
             in_planes = 4
         assert math.log(scale_factor, 2) % 1 == 0
         upsample_block_num = int(math.log(scale_factor, 2))
-        # self.block1 = nn.Sequential(
-        #     nn.Conv2d(in_planes, 2 * hidden_units, kernel_size=9, padding=4),
-        #     nn.PReLU()
-        #     # nn.ReLU()
-        # )
-        # self.srb_nums = srb_nums
-        # if not small:
-        #     for i in range(srb_nums):
-        #         setattr(self, 'block%d' % (i + 2), RecurrentResidualBlock(2 * hidden_units))
-        # else:
-        #     for i in range(srb_nums):
-        #         setattr(self, 'block%d' % (i + 2), RecurrentResidualBlockSmall(2 * hidden_units))
 
-        # setattr(self, 'block%d' % (srb_nums + 2),
-        #         nn.Sequential(
-        #             nn.Conv2d(2 * hidden_units, 2 * hidden_units, kernel_size=3, padding=1),
-        #             nn.BatchNorm2d(2 * hidden_units)
-        #         ))
+
+        self.block1 = nn.Sequential(
+            nn.Conv2d(in_planes, 2 * hidden_units, kernel_size=9, padding=4),
+            nn.PReLU()
+            # nn.ReLU()
+        )
+        self.srb_nums = srb_nums
+        if not small:
+            for i in range(srb_nums):
+                setattr(self, 'block%d' % (i + 2), RecurrentResidualBlock(2 * hidden_units))
+        else:
+            for i in range(srb_nums):
+                setattr(self, 'block%d' % (i + 2), RecurrentResidualBlockSmall(2 * hidden_units))
+
+        setattr(self, 'block%d' % (srb_nums + 2),
+                nn.Sequential(
+                    nn.Conv2d(2 * hidden_units, 2 * hidden_units, kernel_size=3, padding=1),
+                    nn.BatchNorm2d(2 * hidden_units)
+                ))
 
         #self.non_local = NonLocalBlock2D(64, 64)
-        # block_ = [UpsampleBLock(2 * hidden_units, 2) for _ in range(upsample_block_num)]
-        # block_.append(nn.Conv2d(2 * hidden_units, in_planes, kernel_size=9, padding=4))
-        # setattr(self, 'block%d' % (srb_nums + 3), nn.Sequential(*block_))
-        # self.tps_inputsize = [height // scale_factor, width // scale_factor]
+        block_ = [UpsampleBLock(2 * hidden_units, 2) for _ in range(upsample_block_num)]
+        block_.append(nn.Conv2d(2 * hidden_units, in_planes, kernel_size=9, padding=4))
+        setattr(self, 'block%d' % (srb_nums + 3), nn.Sequential(*block_))
+        self.tps_inputsize = [height // scale_factor, width // scale_factor]
+
+
         tps_outputsize = [height // scale_factor, width // scale_factor]
         num_control_points = 20
         tps_margins = [0.05, 0.05]
@@ -262,45 +301,37 @@ class TBSRN(nn.Module):
             x, _ = self.tps(x, ctrl_points_x)
         # print("Size after stn: ", x.size())
 
-        return x
+        #apply first block
+        block = {'1': self.block1(x)}
+        # print("Size after first block: ", block["1"].size())
 
-        # #apply first block
-        # block = {'1': self.block1(x)}
-        # # print("Size after first block: ", block["1"].size())
+        #apply second to sixth block
+        for i in range(self.srb_nums + 1):
+            block[str(i + 2)] = getattr(self, 'block%d' % (i + 2))(block[str(i + 1)])
 
-        # #apply second to sixth block
-        # for i in range(self.srb_nums + 1):
-        #     block[str(i + 2)] = getattr(self, 'block%d' % (i + 2))(block[str(i + 1)])
-
-        # # apply the upsample blocks to the sum of the first block + output of the MHA blocks
-        # if self.quantize:    
-        #     block[str(self.srb_nums + 3)] = getattr(self, 'block%d' % (self.srb_nums + 3))(self.f_add.add(block['1'], block[str(self.srb_nums + 2)]))
-        # else:
-        #     block[str(self.srb_nums + 3)] = getattr(self, 'block%d' % (self.srb_nums + 3))((block['1'] + block[str(self.srb_nums + 2)]))
-        # output = torch.tanh(block[str(self.srb_nums + 3)])
-        # if self.quantize:
-        #     output = self.dequant(output)
-        # # print("Size at end of forward: ", output.size())
-        # return output, block
+        # apply the upsample blocks to the sum of the first block + output of the MHA blocks
+        if self.quantize:    
+            block[str(self.srb_nums + 3)] = getattr(self, 'block%d' % (self.srb_nums + 3))(self.f_add.add(block['1'], block[str(self.srb_nums + 2)]))
+        else:
+            block[str(self.srb_nums + 3)] = getattr(self, 'block%d' % (self.srb_nums + 3))((block['1'] + block[str(self.srb_nums + 2)]))
+        output = torch.tanh(block[str(self.srb_nums + 3)])
+        if self.quantize:
+            output = self.dequant(output)
+        # print("Size at end of forward: ", output.size())
+        return output#, block
 
 
 class RecurrentResidualBlock(nn.Module):
     def __init__(self, channels):
         super(RecurrentResidualBlock, self).__init__()
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        #self.conv1 = Block(channels)
         self.bn1 = nn.BatchNorm2d(channels)
         self.gru1 = GruBlock(channels, channels)
         # self.prelu = nn.ReLU()
-
-        #------ we could try to remove this
         self.prelu = mish()
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        #self.conv2 = Block(channels)
         self.bn2 = nn.BatchNorm2d(channels)
         self.gru2 = GruBlock(channels, channels)
-        #------
-
         self.feature_enhancer = FeatureEnhancer()
 
         for p in self.parameters():
@@ -310,11 +341,9 @@ class RecurrentResidualBlock(nn.Module):
     def forward(self, x):
         residual = self.conv1(x)
         residual = self.bn1(residual)
-        residual = self.gru1(residual)
         residual = self.prelu(residual)
         residual = self.conv2(residual)
         residual = self.bn2(residual)
-        residual = self.gru2(residual)
 
         size = residual.shape
         residual = residual.view(size[0],size[1],-1)

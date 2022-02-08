@@ -8,8 +8,9 @@ from interfaces.super_resolution import TextSR
 def main(config, args):
     Mission = TextSR(config, args)
     if args.test:
-        for epoch in range(3):
-            Mission.test(quantize_static=args.quantize_static, modeldir=f"/home/philipp/FudanOCR/scene-text-telescope/checkpoint/CARcdist/epoch{epoch}_.pth", bitsize=8)
+        epoch = 5
+        for epoch in range(17):
+            Mission.test(quantize_static=args.quantize_static, cdistdir=f'/home/philipp/FudanOCR/scene-text-telescope/checkpoint/finetundcdisttbsrn/epoch{epoch}_.pth')
     elif args.demo:
         Mission.demo()
     elif args.train_cdist:
@@ -19,7 +20,7 @@ def main(config, args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--arch', default='tbsrn', choices=['tbsrn', 'tsrn', 'bicubic', 'srcnn', 'vdsr', 'srres', 'esrgan', 'rdn',
+    parser.add_argument('--arch', default='tbsrn', choices=['tbsrn', 'car', 'tsrn', 'bicubic', 'srcnn', 'vdsr', 'srres', 'esrgan', 'rdn',
                                                            'edsr', 'lapsrn'])
     parser.add_argument('--text_focus', action='store_true')
     parser.add_argument('--exp_name', required=True, help='Type your experiment name')
@@ -39,6 +40,7 @@ if __name__ == '__main__':
     parser.add_argument('--quantize', action='store_true')
     parser.add_argument('--quantize_static', action='store_true')
     parser.add_argument('--train_cdist', action='store_true')
+    parser.add_argument('--cdistresume', type=str, default='/home/philipp/FudanOCR/scene-text-telescope/checkpoint/carcdistfinetunedsave/epoch0_.pth', help='')
     args = parser.parse_args()
     config_path = os.path.join('config', 'super_resolution.yaml')
     config = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)

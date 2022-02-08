@@ -13,7 +13,7 @@ import torch.optim as optim
 from torchvision import transforms
 from collections import OrderedDict
 from torch.utils.tensorboard import SummaryWriter
-
+from EDSR.edsr import EDSR
 from model import tbsrn, tsrn, edsr, srcnn, srresnet, crnn
 import dataset.dataset as dataset
 from dataset import lmdbDataset, alignCollate_real, lmdbDataset_real, alignCollate_syn, lmdbDataset_mix
@@ -35,6 +35,17 @@ import model.cdistnet.build as cdistnet_build
 def get_parameter_number(net):
     total_num = sum(p.numel() for p in net.parameters())
     return total_num
+
+class MyEnsemble(torch.nn.Module):
+    def __init__(self, modelA, modelB):
+        super(MyEnsemble, self).__init__()
+        self.modelA = modelA
+        self.modelB = modelB
+
+        
+    def forward(self, x):
+        #return self.modelB(x)
+        return self.modelB(self.modelA(x))
 
 class TextBase(object):
     def __init__(self, config, args):
@@ -153,7 +164,19 @@ class TextBase(object):
                model = tbsrn.TBSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
                                 STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u, small=small, quantize_static=quantize_static)
             if self.args.rec == "cdist":
-                _, cdist_model = self.cdistnet_init()
+                _, cdist_model = self.cdistnet_init(self.args.cdistresume)
+                cdist_model.eval()
+                image_crit = text_focus_loss.TextFocusLoss(self.args, recognition_model=cdist_model)
+            else:
+                image_crit = text_focus_loss.TextFocusLoss(self.args)
+        elif self.args.arch == 'car':
+            SCALE=2
+            edsr_model = EDSR(32, 256, scale=SCALE).cuda()
+            stn_model = tbsrn.STNmodel(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
+                            STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u, small=small, quantize_static=quantize_static)
+            model = MyEnsemble(stn_model, edsr_model)
+            if self.args.rec == "cdist":
+                _, cdist_model = self.cdistnet_init(self.args.cdistresume)
                 cdist_model.eval()
                 image_crit = text_focus_loss.TextFocusLoss(self.args, recognition_model=cdist_model)
             else:
@@ -199,19 +222,30 @@ class TextBase(object):
                 # image_crit = torch.nn.DataParallel(image_crit)
             if self.resume is not '':
                 self.logging.info('loading pre-trained model from %s ' % self.resume)
-                if self.config.TRAIN.ngpu == 1:
-                    weights = torch.load(self.resume)['state_dict_G']
-                    # if quantized:
-                    #     for key in ["block2.conv1.bias", "block2.conv2.bias", "block3.conv1.bias", "block3.conv2.bias", "block4.conv1.bias", "block4.conv2.bias", "block5.conv1.bias", "block5.conv2.bias", "block6.conv1.bias", "block6.conv2.bias"]:
-                    #         del weights[key]
-                    #model.load_state_dict(weights)
+                if self.args.arch == 'car':
+                    weights = {}
+                    for k,v in torch.load(self.resume)['state_dict_G'].items():
+                        if k.startswith("modelA.module"):
+                            weights["module.modelA."+k[14:]] = v
+                        elif k.startswith("modelB"):
+                            weights["module."+k] = v
+                        else:
+                            weights[k] = v
+                    model.load_state_dict(weights)
                 else:
-                    weights = {'module.' + k: v  for k, v in torch.load(self.resume)['state_dict_G'].items() if ('tps' in k or 'stn' in k)}
-                    #print(weights)
-                    # if quantized:
-                    #     for key in ["module.block2.conv1.bias", "module.block2.conv2.bias", "module.block3.conv1.bias", "module.block3.conv2.bias", "module.block4.conv1.bias", "module.block4.conv2.bias", "module.block5.conv1.bias", "module.block5.conv2.bias", "module.block6.conv1.bias", "module.block6.conv2.bias"]:
-                    #         del weights[key]
-                #model.load_state_dict(weights)
+                    if self.config.TRAIN.ngpu == 1:
+                        weights = torch.load(self.resume)['state_dict_G']
+                        # if quantized:
+                        #     for key in ["block2.conv1.bias", "block2.conv2.bias", "block3.conv1.bias", "block3.conv2.bias", "block4.conv1.bias", "block4.conv2.bias", "block5.conv1.bias", "block5.conv2.bias", "block6.conv1.bias", "block6.conv2.bias"]:
+                        #         del weights[key]
+                        #model.load_state_dict(weights)
+                    else:
+                        weights = {'module.' + k: v  for k, v in torch.load(self.resume)['state_dict_G'].items()}# if ('tps' in k or 'stn' in k)}
+                        #print(weights)
+                        # if quantized:
+                        #     for key in ["module.block2.conv1.bias", "module.block2.conv2.bias", "module.block3.conv1.bias", "module.block3.conv2.bias", "module.block4.conv1.bias", "module.block4.conv2.bias", "module.block5.conv1.bias", "module.block5.conv2.bias", "module.block6.conv1.bias", "module.block6.conv2.bias"]:
+                        #         del weights[key]
+                    model.load_state_dict(weights)
 
                 bits = 5
                 uncompressed_size = 0
@@ -435,12 +469,13 @@ class TextBase(object):
             'param_num': sum([param.nelement() for param in netG.parameters()]),
             'converge': converge_list
         }
+        save_dict = netG.state_dict()
         if epoch_save:
-            torch.save(save_dict, os.path.join(ckpt_path, f'epoch{epoch}_.pth'))
+            torch.save(netG, os.path.join(ckpt_path, f'epoch{epoch}_.pth'))
         if is_best:
-            torch.save(save_dict, os.path.join(ckpt_path, 'model_best.pth'))
+            torch.save(netG, os.path.join(ckpt_path, 'model_best.pth'))
         else:
-            torch.save(save_dict, os.path.join(ckpt_path, 'checkpoint.pth'))
+            torch.save(netG, os.path.join(ckpt_path, 'checkpoint.pth'))
 
     def MORAN_init(self):
         cfg = self.config.TRAIN
@@ -487,12 +522,14 @@ class TextBase(object):
         model.load_state_dict(torch.load(model_path))
         return model, aster_info
     
-    def cdistnet_init(self):
+    def cdistnet_init(self, path="dataset/10_best_acc.pth"):
         cfg = self.config.TRAIN
         model = cdistnet_build.build_cdistnet(cfg.cdistnet)
         model = model.to(self.device)
-        model.load_state_dict(torch.load("dataset/10_best_acc.pth"))
-        # model_info = AsterInfo(cfg.voc_type)
+        try:
+            model = torch.load(path)
+        except:
+            model.load_state_dict(torch.load(path))
         translator = Translator(cfg.cdistnet, model)
         return translator, model
 
