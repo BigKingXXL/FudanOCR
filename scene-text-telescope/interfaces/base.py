@@ -527,9 +527,9 @@ class TextBase(object):
         model = cdistnet_build.build_cdistnet(cfg.cdistnet)
         model = model.to(self.device)
         try:
-            model = torch.load(path)
-        except:
             model.load_state_dict(torch.load(path))
+        except:
+            model = torch.load(path)
         translator = Translator(cfg.cdistnet, model)
         return translator, model
 
