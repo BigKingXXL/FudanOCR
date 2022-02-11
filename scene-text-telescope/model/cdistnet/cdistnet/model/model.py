@@ -144,7 +144,7 @@ class CDistNet(nn.Module):
         self.tgt_word_prj = nn.Linear(cfg.hidden_units, cfg.dst_vocab_size, bias=False)
         self.tgt_word_prj.weight.data.normal_(mean=0.0, std=cfg.hidden_units ** -0.5)
 
-    def forward(self, image, tgt):
+    def forward(self, image, tgt, return_pos=False):
         tgt = tgt[:, :-1]
         vis_feat,vis_key_padding_mask = self.visual_branch(image)
         sem_feat,sem_mask,sem_key_padding_mask = self.semantic_branch(tgt)
@@ -164,6 +164,8 @@ class CDistNet(nn.Module):
         output = output.permute(1, 0, 2)
 
         logit = self.tgt_word_prj(output)
+        if return_pos:
+            return logit.view(-1, logit.shape[2]), output
         return logit.view(-1, logit.shape[2])
 
     def _reset_parameters(self):

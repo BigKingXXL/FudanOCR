@@ -102,14 +102,14 @@ class TextFocusLoss(nn.Module):
 
         if self.args.text_focus:
             label = [str_filt(i, 'lower')+'-' for i in label]
-            length_tensor, input_tensor, text_gt = self.label_encoder(label)
-            hr_pred, word_attention_map_gt, hr_correct_list = self.transformer(to_gray_tensor(hr_img), length_tensor,
-                                                                          input_tensor, test=False)
-            sr_pred, word_attention_map_pred, sr_correct_list = self.transformer(to_gray_tensor(sr_img), length_tensor,
-                                                                            input_tensor, test=False)
             recognition_loss = 0
             #recognition_loss += weight_cross_entropy(sr_pred, text_gt)
             if self.recognition_model is None:
+                length_tensor, input_tensor, text_gt = self.label_encoder(label)
+                hr_pred, word_attention_map_gt, hr_correct_list = self.transformer(to_gray_tensor(hr_img), length_tensor,
+                                                                            input_tensor, test=False)
+                sr_pred, word_attention_map_pred, sr_correct_list = self.transformer(to_gray_tensor(sr_img), length_tensor,
+                                                                            input_tensor, test=False)
                 recognition_loss += weight_cross_entropy(sr_pred, text_gt)
 
             else:
@@ -119,10 +119,13 @@ class TextFocusLoss(nn.Module):
                 encoded = self.converter_cdist.encode(label)
                 padded_y = cdist_data.tgt_pad(encoded).to(self.device)
                 tgt = padded_y[:, 1:]
-                sr_pred = self.recognition_model(cdist_input, padded_y)
+                sr_pred, word_attention_map_pred = self.recognition_model(cdist_input, padded_y, True)
                 cdist_losss, n_correct = cal_performance(sr_pred, tgt, smoothing=label_smoothing,local_rank=device)
                 recognition_loss += cdist_losss
-                                                 
+
+                cdist_input_gt = self.parse_cdist_data(hr_img[:, :3, :, :]).to(self.device)
+                gt_pred, word_attention_map_gt = self.recognition_model(cdist_input_gt, padded_y, True)
+
             attention_loss = self.l1_loss(word_attention_map_gt, word_attention_map_pred)
             # recognition_loss = self.l1_loss(hr_pred, sr_pred)
             #recognition_loss = weight_cross_entropy(sr_pred, text_gt)
