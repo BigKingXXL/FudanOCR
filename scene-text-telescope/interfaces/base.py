@@ -224,14 +224,20 @@ class TextBase(object):
                 self.logging.info('loading pre-trained model from %s ' % self.resume)
                 if self.args.arch == 'car':
                     weights = {}
-                    for k,v in torch.load(self.resume)['state_dict_G'].items():
-                        if k.startswith("modelA.module"):
-                            weights["module.modelA."+k[14:]] = v
-                        elif k.startswith("modelB"):
-                            weights["module."+k] = v
-                        else:
-                            weights[k] = v
-                    model.load_state_dict(weights)
+                    loaded = torch.load(self.resume)
+                    try:
+                        model.load_state_dict(loaded)
+                    except:
+                        if 'state_dict_G' in loaded:
+                            loaded = loaded['state_dict_G']
+                        for k,v in loaded.items():
+                            if k.startswith("modelA.module"):
+                                weights["module.modelA."+k[14:]] = v
+                            elif k.startswith("modelB"):
+                                weights["module."+k] = v
+                            else:
+                                weights[k] = v
+                        model.load_state_dict(weights)
                 else:
                     if self.config.TRAIN.ngpu == 1:
                         weights = torch.load(self.resume)['state_dict_G']
