@@ -47,6 +47,16 @@ class MyEnsemble(torch.nn.Module):
         #return self.modelB(x)
         return self.modelB(self.modelA(x))
 
+class TorchUpscaler(torch.nn.Module):
+    def __init__(self, mode='bicubic'):
+        super(TorchUpscaler, self).__init__()
+        self.mode = mode
+        
+    def forward(self, x):
+        #return self.modelB(x)
+        #torch.nn.functional.interpolate(x.view(1,-1,16,64), scale_factor=(2,2), mode=self.mode).view(-1,32,128)
+        return torch.nn.functional.interpolate(x.view(-1,3,16,64), scale_factor=(2,2), mode=self.mode).view(-1,3,32,128)
+
 class TextBase(object):
     def __init__(self, config, args):
         super(TextBase, self).__init__()
@@ -185,9 +195,14 @@ class TextBase(object):
             model = tsrn.TSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
                               STN=self.args.STN, mask=self.mask, srb_nums=self.args.srb, hidden_units=self.args.hd_u)
             image_crit = text_focus_loss.TextFocusLoss(self.args)
-        elif self.args.arch == 'bicubic' and self.args.test:
-            model = bicubic.BICUBIC(scale_factor=self.scale_factor)
-            image_crit = text_focus_loss.TextFocusLoss(self.args)
+        elif self.args.arch in ['bicubic', 'bilinear', 'area', 'nearest']:
+            model = TorchUpscaler(mode=self.args.arch)
+            if self.args.rec == "cdist":
+                _, cdist_model = self.cdistnet_init(self.args.cdistresume)
+                cdist_model.eval()
+                image_crit = text_focus_loss.TextFocusLoss(self.args, recognition_model=cdist_model)
+            else:
+                image_crit = text_focus_loss.TextFocusLoss(self.args)
         elif self.args.arch == 'srcnn':
             model = srcnn.SRCNN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height, STN=self.args.STN)
             image_crit = text_focus_loss.TextFocusLoss(self.args)
@@ -523,6 +538,8 @@ class TextBase(object):
         return model, aster_info
     
     def cdistnet_init(self, path="dataset/10_best_acc.pth"):
+        #path="dataset/10_best_acc.pth"
+        #path=self.args.cdistresume
         cfg = self.config.TRAIN
         model = cdistnet_build.build_cdistnet(cfg.cdistnet)
         model = model.to(self.device)

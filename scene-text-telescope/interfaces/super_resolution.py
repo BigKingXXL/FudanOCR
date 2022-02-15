@@ -18,7 +18,7 @@ import wandb
 from torch.utils.data import DataLoader
 import model.cdistnet.cdistnet.optim.loss as cdist_loss
 import model.cdistnet.cdistnet.data.data as cdist_data
-import re
+import cv2
 from EDSR.edsr import EDSR
 import os
 import wandb
@@ -28,6 +28,8 @@ from interfaces.ocs import *
 from interfaces.clip import *
 from model.cdistnet.cdistnet.optim.loss import cal_performance
 import torch.optim as optim
+from octotorch import OctoTorch
+
 
 wandb.init(project="BigKingXXL", entity="bigkingxxl", save_code=True)
 #os.environ['WANDB_MODE'] = 'offline'
@@ -43,6 +45,8 @@ KSIZE = 3 * SCALE + 1
 OFFSET_UNIT = SCALE
 USNPATH = '/home/philipp/FudanOCR/scene-text-telescope/2x/usn.pth'
 MODELDIR = '/home/philipp/FudanOCR/scene-text-telescope/checkpoint/stnworkingwtfGradients/epoch5_.pth'
+ADVANTAGE_STRINGS = ['11:00am-11:00', '11:00am-11:00', '11:00am-11:00', '11:00am-11:00', 'Quickly', 'Brown', 'Quickly', '100%', 'Mochi', 'in', '20', '92', '30%', 'paper', 'Products', '20', 'paper', '20', '92', '30%', 'copy', 'paper', '20', '20', '92', '92', 'copy', 'Products', '92', 'in', 'Products', 'Ch', 'GUINEA', 'FOOD', 'GUINEA', 'Pure', 'THE', 'ARTS', 'BOY', 'ANDY', 'LEXUS', 'LEXUS', 'NO', 'PARKING', 'NO', 'PARKING', '3', 'PARKING', 'PM', 'PM', '3', '3', 'PARKING', 'PARKING', '900', 'WAY', 'WAY', '900', 'BAY', 'SHUTTLE,', 'OAK,', '510-401-4657', '510-401-4657', '28476-P', 'CHICKEN', 'CHICKEN', 'of', '1', 'Thickness', 'ES', 'TRADER', 'Nuts', 'Raw', 'Raw', 'CHAPMAN', 'CHAPMAN', 'UNIVERSITY', 'EST.', 'PARKING', 'PARKING', 'TRESPASSING', 'TRESPASSING', 'VEHICLES', 'VEHICLES', '644-6744', '644-6744', 'SITE', 'SITE', 'DE', 'DE', 'DE', 'DE', 'NO', 'NO', 'ALCOHOLIC', 'ALCOHOLIC', 'BEVERAGES', 'NO', 'NO', 'NO', 'NO', 'LOUD', 'LOUD', 'NO', 'NO', 'NO', 'NO', 'NO', 'NO', 'WEAPONS', 'NO', 'NO', 'SMOKING', 'NO', 'NO', 'EXCEPTIONS', 'EXCEPTIONS', 'MATERIALS', 'DAILY', 'NO', 'NO', 'BEBIDAS', 'NO', 'NO', 'ANIMALES', 'NO', 'NO', 'MUSICAALTA', 'AUDIFONOS', 'NO', 'NO', 'DROGAS', 'DROGAS', 'NO', 'NO', 'NO', 'NO', 'NO', 'NO', 'FUMAR', 'NO', 'NO', 'iCALIDAD', 'MATERIALES', 'DE', 'DESECHO', 'MANDATORY', 'ON', 'ON', 'SITE', 'OBLIGATORIOS', 'OBLIGATORIOS', 'ENFORZADA', 'AvalonBay', 'of', 'this', 'Market', 'P', 'P', 'A', 'A', 'during', 'UPS', 'GROWTH', 'IN', 'AN', 'ERA', 'OF', 'THE', 'BREAKTHROUGH', 'IDEAS', 'IDEAS', 'A', 'AN', 'ERA', 'SMALL', 'SMALL', 'DISCOVERIES', 'THE', 'READY,SET,DOMINATE', 'THE', 'THE', 'a', 'a', 'Strategic', 'a', 'Comp', 'Comp', 'CROSS', 'THE', 'NEW', 'THE', 'OF', 'of', 'P', '62nd', '62nd', 'St', 'WAY', 'NO', 'SUPER', 'SUPER', 'ODYSSEY', 'TROPICAL', 'MARIOTENNIS', 'ADAMS', 'NOW', '(408)', 'Christie', 'NO', 'PARKING', 'PARKING', 'NO', 'NO', 'PARKING', 'PARKING', 'SWEEPING', 'Christie', 'Christie', 'NO', 'COMMERCIAL', 'PARKING', 'P', 'St', 'Market', 'Dr', 'Nintendo.', 'R', 'of', 'NO', 'RTENCIA:', 'Honey', 'Bucket', 'JUL', 'ON', 'THORNE', 'THE', 'THE', 'SECOND', 'IDEAS', 'IDEAS', 'Performances', 'for', 'Film', '3', '2', '2', 'THE', 'John', 'Stoner', 'THE', 'Dea', 'Dea', 'THE', 'THE', 'IN', 'IN', 'author', 'bestselling', 'THE', 'OF', 'OF', 'of', 'a', 'ARTHUR', 'ARTHUR', 'Rogers', 'Mindfulness', 'Mindfulness', 'Law', 'MNOOKIN', 'TULUMELLO', 'Mindful', 'PARKING', 'LENBROOK', 'BASIC', 'FORTRAN', 'FORTRAN', '3', 'PASCAL', 'NEANDERTHAL', 'ASSEMBLER', 'ASSEMBLER', 'NONSENSE', 'PIGLATIN', '8000', 'THE', 'THE', '2', 'IN', '1', '8MHz', 'SPEED', 'SPEED', '2', '200', 'PWR.', '0', 'DRIVE', 'ASSEMBLY', '640', 'GET', 'GET', '0-60', 'IN', 'MPG', 'ORTHOPEDIC', 'IN', '3', 'Christie', 'St', 'St', 'MER', 'MER', 'grapefruit', 'LEAN', 'LEAN']
+
 
 class MyEnsemble(torch.nn.Module):
     def __init__(self, modelA, modelB):
@@ -56,6 +60,40 @@ class MyEnsemble(torch.nn.Module):
         return self.modelB(self.modelA(x))
         
 class TextSR(base.TextBase):
+    def findQuantization(self):
+        student_model_dict = self.generator_init(quantized=self.args.quantize)
+        SRmodel, _ = student_model_dict['model'], student_model_dict['crit']
+        SRmodel.eval()
+        allowed = [
+                    'conv',
+                    'multihead',
+                    'linear',
+                    '.pff.',
+                    'stn_fc',
+                    'head',
+                    'body'
+                ]
+        OctoTorch(SRmodel, score_func=self.scoreCAR, allow_layers=allowed, thresh=0.975).quantize()
+
+
+    def scoreCAR(self, SRmodel):
+        cfg = self.config.TRAIN
+        val_dataset_list, val_loader_list = self.get_val_data()
+
+        SRmodel.eval()
+
+        _, cdistmodel = self.cdistnet_init()
+        accs = []
+        for k, val_loader in (enumerate(val_loader_list)):
+            data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
+            #vpbar.set_description_str(data_name)
+            logging.info(f'evaluating {data_name}')
+            metrics_dict = self.eval_rec(cdistmodel, SRmodel, val_loader, 1, data_name)
+            accs.append(metrics_dict['accuracy'])
+
+        return np.mean(accs)
+
+
     def train_rec(self):
         cfg = self.config.TRAIN
 
@@ -70,9 +108,9 @@ class TextSR(base.TextBase):
         val_dataset_list, val_loader_list = self.get_val_data()
 
 
-        student_model_dict = self.generator_init(quantized=self.args.quantize)
-        SRmodel, _ = student_model_dict['model'], student_model_dict['crit']
-        SRmodel.eval()
+        #student_model_dict = self.generator_init(quantized=self.args.quantize)
+        #SRmodel, _ = student_model_dict['model'], student_model_dict['crit']
+        #SRmodel.eval()
 
         _, cdistmodel = self.cdistnet_init()
         best_history_acc = dict(
@@ -91,8 +129,9 @@ class TextSR(base.TextBase):
                     p.requires_grad = True
                 iters = len(train_loader) * epoch + j
 
-                _, images_lr, label_strs = data
-                images_hr = SRmodel(images_lr.to(self.device))
+                images_hr, images_lr, label_strs = data
+                #_, images_lr, label_strs = data
+                #images_hr = SRmodel(images_lr.to(self.device))
 
                 label_smoothing = True
                 cdist_input = self.parse_cdist_data(images_hr[:, :3, :, :]).to(self.device)
@@ -124,7 +163,8 @@ class TextSR(base.TextBase):
                         data_name = self.config.TRAIN.VAL.val_data_dir[k].split('/')[-1]
                         #vpbar.set_description_str(data_name)
                         logging.info(f'evaluating {data_name}')
-                        metrics_dict = self.eval_rec(cdistmodel, SRmodel, val_loader, iters, data_name)
+                        metrics_dict = self.eval_rec(cdistmodel, 'none', val_loader, iters, data_name)
+                        #metrics_dict = self.eval_rec(cdistmodel, SRmodel, val_loader, iters, data_name)
                         converge_list.append({'iterator': iters, 'acc': metrics_dict['accuracy']})
                         acc = metrics_dict['accuracy']
                         current_acc_dict[data_name] = float(acc)
@@ -174,10 +214,12 @@ class TextSR(base.TextBase):
                        'images_and_labels': []}
         image_start_index = 0
         for i, data in (enumerate(val_loader)):
-            _, images_lr, label_strs = data
-            val_batch_size = images_lr.shape[0]
+            images_hr, images_lr, label_strs = data
+            
+            #_, images_lr, label_strs = data
+            #images_hr = SRmodel(images_lr.to(self.device))
 
-            images_hr = SRmodel(images_lr.to(self.device))
+            val_batch_size = images_lr.shape[0]
 
             cdist_input = self.parse_cdist_data(images_hr[:, :3, :, :]).to(self.device)
             # print(cdist_input.size())
@@ -239,6 +281,12 @@ class TextSR(base.TextBase):
         student_model_dict = self.generator_init(quantized=self.args.quantize)
         student_model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
 
+        # if self.args.downsample:
+        #     kernel_generation_net = DSN(k_size=KSIZE, scale=SCALE).cuda()
+        #     downsampler_net = Downsampler(SCALE, KSIZE).cuda()
+        #     kernel_generation_net.load_state_dict(torch.load('/home/philipp/FudanOCR/scene-text-telescope/2x/kgn.pth'))
+        #     kernel_generation_net.eval()
+        #     downsampler_net.eval()
 
         if self.args.rec == 'moran':
             aster = self.MORAN_init()
@@ -288,7 +336,25 @@ class TextSR(base.TextBase):
 
                 student_image_prediction = student_model(images_lr)
 
+                # if self.args.downsample:
+                #     kernels, offsets_h, offsets_v = kernel_generation_net(images_hr)
+                #     downscaled_img = downsampler_net(images_hr, kernels, offsets_h, offsets_v, OFFSET_UNIT)
+                #     downscaled_img = torch.clamp(downscaled_img, 0, 1)
+
+                #     resampled_image_prediction = student_model(downscaled_img)
+
                 loss, mse_loss, attention_loss, recognition_loss = student_image_crit(student_image_prediction, images_hr, label_strs)
+                # if self.args.downsample:
+                #     resampled_loss, resampled_mse_loss, resampled_attention_loss, resampled_recognition_loss = student_image_crit(resampled_image_prediction, images_hr, label_strs)
+                #     loss += resampled_loss
+                #     loss /= 2
+                #     mse_loss += resampled_mse_loss
+                #     mse_loss /= 2
+                #     attention_loss += resampled_attention_loss
+                #     attention_loss /= 2
+                #     recognition_loss += resampled_recognition_loss
+                #     recognition_loss /= 2
+
                 del images_hr
                 del images_lr
                 torch.cuda.empty_cache()
@@ -496,8 +562,6 @@ class TextSR(base.TextBase):
         os.remove('temp.p')
 
     def test(self, quantize_static=False, cdistdir='', bitsize=32):
-        #model_dict = self.generator_init(quantize_static=quantize_static)
-        #model, image_crit = model_dict['model'], model_dict['crit']
         student_model_dict = self.generator_init(quantized=self.args.quantize)
         model, student_image_crit = student_model_dict['model'], student_model_dict['crit']
 
@@ -507,14 +571,13 @@ class TextSR(base.TextBase):
         all_w_count = 0
         qat_w_count = 0
 
-        method = 'none'
+        method = 'aciq'
 
         if method == 'aciq':
             for key, value in model.named_parameters():
                 if 'gru' not in key:
                     uncompressed_size += value.data.element_size() * 8 * value.data.numel()
                 all_w_count += value.data.numel()
-                #print(key)
                 quantization_keys = [
                     'conv',
                     'multihead',
@@ -525,10 +588,8 @@ class TextSR(base.TextBase):
                     'body'
                 ]
                 if (any(name in key for name in quantization_keys)):
-                    #print('compressing ' + key + ' ' + str(value.shape) + ' to ' + str(bits) + 'bits using ' + qat_method)
                     weight_np = value.data.cpu().detach().numpy()
                     qat_w_count += value.data.numel()
-                    # print(weight_np)
                     # obtain value range
                     params_min_q_val, params_max_q_val = get_quantized_range(bits, signed=True)
                     # find clip threshold
@@ -562,33 +623,6 @@ class TextSR(base.TextBase):
 
         items = os.listdir(self.test_data_dir)
 
-        if quantize_static:
-            model.eval()
-            self.print_size_of_model(model)
-            model.qconfig = torch.quantization.default_qconfig
-            print(model.qconfig)
-            torch.quantization.prepare(model, inplace=True)
-            counter = 0
-            for test_dir in items:
-                test_data, test_loader = self.get_test_data(os.path.join(self.test_data_dir, test_dir))
-                for i, data in (enumerate(test_loader)):
-                    print(f"Calibration batch {counter}")
-                    if counter > 32:
-                        break
-                    images_hr, images_lr, label_strs = data
-                    val_batch_size = images_lr.shape[0]
-                    images_lr = images_lr.to(self.device)
-                    images_hr = images_hr.to(self.device)
-                    sr_beigin = time.time()
-                    images_sr, _ = model(images_lr)
-                    counter+=1
-
-                if counter > 32:
-                    break
-
-            torch.quantization.convert(model, inplace=True)
-            self.print_size_of_model(model)
-
         for test_dir in items:
             test_data, test_loader = self.get_test_data(os.path.join(self.test_data_dir, test_dir))
             data_name = self.args.test_data_dir.split('/')[-1]
@@ -610,12 +644,67 @@ class TextSR(base.TextBase):
                 for p in model.parameters():
                     p.requires_grad = False
                 model.eval()
+
+            bits = bitsize
+            uncompressed_size = 0
+            compressed_size = 0
+            all_w_count = 0
+            qat_w_count = 0
+
+            method = 'aciq'
+
+            if method == 'aciq':
+                for key, value in cdist.named_parameters():
+                    if 'gru' not in key:
+                        uncompressed_size += value.data.element_size() * 8 * value.data.numel()
+                    all_w_count += value.data.numel()
+                    quantization_keys = [
+                        'linear',
+                        'multihead_attn',
+                        'self_attn',
+                        'localization_fc',
+                    ]
+                    if (any(name in key for name in quantization_keys)):
+                        weight_np = value.data.cpu().detach().numpy()
+                        qat_w_count += value.data.numel()
+                        # print(weight_np)
+                        # obtain value range
+                        params_min_q_val, params_max_q_val = get_quantized_range(bits, signed=True)
+                        # find clip threshold
+                        if method == 'lq':  # fix threshold
+                            clip_max_abs = np.max(np.abs(weight_np))
+                        elif method == 'aciq':  # calculate threshold
+                            values = weight_np.flatten().copy()
+                            clip_max_abs = find_clip_aciq(values, bits)
+            
+                        # quantize weights
+                        w_scale = symmetric_linear_quantization_scale_factor(bits, clip_max_abs)
+                        q_weight_np = linear_quantize_clamp(weight_np, w_scale, params_min_q_val, params_max_q_val, inplace=False)
+            
+                        # dequantize/rescale
+                        q_weight_np = linear_dequantize(q_weight_np, w_scale)
+                        # print(q_weight_np)
+            
+                        # update weight
+                        value.data = torch.tensor(q_weight_np).to(self.device)
+                        if 'gru' not in key:
+                            compressed_size += bits * value.data.numel()
+                    else:
+            
+                        if 'gru' not in key:
+                            print(key)
+                            compressed_size += value.data.element_size() * 8 * value.data.numel()
+
+            print("cdist Compressed size:", compressed_size)
+            print("cdist Uncompressed size:", uncompressed_size)
+
             n_correct = 0
             sum_images = 0
             metric_dict = {'psnr': [], 'ssim': [], 'accuracy': 0.0, 'psnr_avg': 0.0, 'ssim_avg': 0.0}
             current_acc_dict = {test_dir: 0}
             time_begin = time.time()
             sr_time = 0
+            labels = []
             for i, data in (enumerate(test_loader)):
                 images_hr, images_lr, label_strs = data
                 val_batch_size = images_lr.shape[0]
@@ -624,14 +713,12 @@ class TextSR(base.TextBase):
                 sr_beigin = time.time()
                 images_sr = model(images_lr)
 
-                # print('srshape',images_sr.shape)
-                # print('hrshape',images_hr.shape)
-
-                # images_sr = images_lr
                 sr_end = time.time()
                 sr_time += sr_end - sr_beigin
                 metric_dict['psnr'].append(self.cal_psnr(images_sr, images_hr))
                 metric_dict['ssim'].append(self.cal_ssim(images_sr, images_hr))
+
+                
 
                 if self.args.rec == 'moran':
                     moran_input = self.parse_moran_data(images_sr[:, :3, :, :])
@@ -682,15 +769,6 @@ class TextSR(base.TextBase):
                         #print(dinput, doutput)
                         if dinput.split("</s>")[0] == doutput.split("</s>")[0]:
                             n_correct += 1
-                    #n_correct += (preds.eq(padded_y).sum(axis=1) == length).sum().item()
-                    # print(n_correct)
-                    # padded_y = padded_y.contiguous().view(-1)
-                    # non_pad_mask = padded_y.ne(0)
-                    # equal_chars = preds.eq(padded_y)
-                    # n_correct += equal_chars.masked_select(non_pad_mask).sum().item()
-                    #preds = torch.tensor(cdist_output).to(self.device)
-                    #preds_size = torch.IntTensor([cdist_output.size(0)] * val_batch_size)
-                    #pred_str_sr = self.converter_cdist.decode(preds.data, preds_size.data, raw=False)
 
                 if self.args.rec != 'cdist':
                     for pred, target in zip(pred_str_sr, label_strs):
@@ -702,7 +780,6 @@ class TextSR(base.TextBase):
                     logging.info('Evaluation: [{}][{}/{}]\t'
                           .format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                                   i + 1, len(test_loader), ))
-                # self.test_display(images_lr, images_sr, images_hr, pred_str_lr, pred_str_sr, label_strs, str_filt)
             time_end = time.time()
             psnr_avg = sum(metric_dict['psnr']) / len(metric_dict['psnr'])
             ssim_avg = sum(metric_dict['ssim']) / len(metric_dict['ssim'])
@@ -713,6 +790,7 @@ class TextSR(base.TextBase):
             current_acc_dict[test_dir] = float(acc)
             result = {'accuracy': current_acc_dict, 'psnr_avg': psnr_avg, 'ssim_avg': ssim_avg, 'fps': fps}
             logging.info(result)
+            print(labels)
 
     def demo(self):
         mask_ = self.args.mask
